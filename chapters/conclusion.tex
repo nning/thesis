@@ -1,0 +1,140 @@
+\chapter{Conclusion}
+\label{cha:conclusion}
+
+\section{Recapitulation of Results}
+
+	The following subsection lists our accomplishments and the deficiencies of
+	our implementation for each research question.
+
+	\subsection*{How can \ac{CoAP} be implemented?}
+
+		We iteratively designed and developed the protocol handling for a
+		\ac{CoAP} server. Opposed to our previous estimations, we did not
+		depend on larger parts of a shared library for the \ac{CoAP}
+		transmission layer but only for message parsing and assembly. The
+		implementation makes use of Message Deduplication to lower the waste of
+		server resources through retransmitted confirmable messages. Resource
+		representations are requestable utilizing Block-wise transfers. Our
+		client interoperability evaluation showed a very good protocol
+		interoperability, although we would favor a more polished \ac{CoAP}
+		transmission implementation that supports separate responses,
+		confirmable messages initiated by the server, and incoming Block-wise
+		Transfers. A structure comparable to Rack's middleware stack for
+		different protocol layers would probably have improved code modularity
+		and quality.
+
+	\subsection*{How to handle a huge amount of \ac{IoT} devices?}
+
+		Message handling was implemented utilizing a single threaded, non
+		blocking event loop as a model providing a good balance between
+		performance and Ruby \ac{VM} interoperability. In the performance
+		evaluations, our realization of this model yielded a message throughput
+		almost three times higher than previously anticipated. Also, our server
+		has almost twice the throughput as Ruby \ac{HTTP} servers running on
+		\ac{MRI}. However, further performance optimizations that make closer
+		use of the different Ruby \ac{VM} characteristics would be desirable.
+
+	\subsection*{Does the Rack interface comply with the characteristics of
+		\ac{CoAP}?}
+
+		We showed with our implementation of the Rack interface that it is
+		basically also working in a sufficient way in conjunction with
+		\ac{CoAP}. Some functionality was implemented as Rack middleware by us
+		(\texttt{David::ShowExceptions}, \texttt{David::ResourceDiscovery}).
+		The framework interoperability tests showed that the server
+		implementation of the Rack interface is compatible to numerous
+		different Rack based web frameworks. The only major restriction of the
+		Rack interface is the problematic integration of asynchronous
+		responses. The performance of our implementation in average cases could
+		probably be improved by integrating a caching of Rack application
+		responses.
+
+	\subsection*{How can a later integration of transport encryption with
+		\ac{DTLS} \cite{dtls} be supported?}
+
+		We provide a basic interface for a \ac{DTLS} integration and means to
+		pass details of the encrypted connection to the Rack middleware stack
+		and the application.
+
+	\subsection*{How can headers be translated between \ac{HTTP} and \ac{CoAP}?}
+
+		According to our design, the server transparently translates \ac{CoAP}
+		requests into Rack environments and Rack application responses into
+		\ac{CoAP} responses. The framework and client interoperability tests
+		showed that this translation works well. Only the explicit returning of
+		\ac{CoAP} response codes, while a status code mapping from \ac{HTTP} to
+		\ac{CoAP} is activated, keeps to be somewhat cumbersome. We also did
+		not implement all possible translations as Conditional Request Options
+		for example (see section 5.10.8 of \cite{coap}).
+
+	\subsection*{How can payload formats be translated between their suitable
+		fields of application?}
+
+		Our design and implementation provides an automatic and transparent
+		transcoding between \ac{JSON} and \ac{CBOR} resource representations.
+		However, it is only activatable for an controller or action of the
+		application. We also would have liked a more extensive and generalized
+		transcoding implementation as a Rack middleware.
+
+	\subsection*{Is the \ac{CoAP} Resource Discovery implementable
+		transparently for the Rack application?}
+
+		We provide a solution for a transparent discovery of the resources of a
+		\ac{Rails} application as a Rack middleware. In contrast to most other
+		\ac{CoAP} implementations, we integrated multicast communications also
+		supporting the \ac{CoAP} multicast groups. The attributes of resources
+		like interface descriptions are configurable from the \ac{Rails}
+		controllers. Unfortunately, we could not provide a Rack application and
+		framework agnostic way of resource autodetection.
+
+	\subsection*{Can a \acl{RD} be realized with the created software?}
+
+		The \ac{RD} and Lookup Funtion Sets of the \ac{RD} draft \cite{rd} have
+		been implemented as a \ac{Rails} application by us. The development
+		process showed that our solution is compatible to the specifications of
+		that draft and that \ac{TDD} with RSpec works for \ac{CoAP} application
+		development with \ac{Rails}. However, the Group Function Set is not
+		supported yet. The Lookup Function Set was only implemented for
+		resource lookup.
+
+	\subsection*{Is it possible to support Observe?}
+
+		We implemented the Observe extension based on \emph{Celluloid} actors.
+		The determination whether updates are necessary is solved utilizing
+		entity tags. We also designed a system based on \ac{HTTP} Caching to
+		minimize the overhead of update checks. Our interoperability
+		evaluations showed that the implemented observe support works with
+		different clients and frameworks. Some implementation details such as
+		garbage collection of observe relationships, caching on update checks,
+		and deregister through reset messages were not realized by us.
+
+\section{Perspectives}
+
+	Implementing solutions to the deficiencies mentioned in the preceding
+	accomplishment summary is a next step for the further existence of the
+	created software system as an Open Source project. Especially the polishing
+	of the \ac{CoAP} transmission implementation, further performance
+	optimizations, working \ac{DTLS}, and protocol translations in a more
+	detailed way are important goals. For performance optimizations the
+	examination of the architectures \acs{AMPED}, \acs{SEDA} and PIPELINED
+	would be interesting (see section 4.1.2 of \cite{scalable-iot}). The
+	transcoding functionality of the server should be decoupled, generalized to
+	work with other content formats, and -- as a Rack middleware -- made
+	independent of \ac{CoAP}. The possibility to activate transcodings for
+	single controllers or actions would be a useful feature. As the
+	autodetection of resources for the Resource Discovery currently only works
+	with \ac{Rails}, compatiblity to other Rack compatible frameworks would be
+	an improvement. As mentioned before, the \ac{RD} application and the
+	observe implementation are also providing some possibilities to be further
+	improved. We will further develop and maintain the open source projects
+	started during this work and probably try to get other people involved.
+	That includes the Ruby \ac{CoAP} library for which also numerous
+	improvements are possible.
+
+	Beyond the concrete implementation created during this work, there are some
+	possible applications of parts of our design in the context of other
+	\ac{CoAP} servers. We would like to see solutions for hosting \ac{IoT} web
+	applications developed in Ruby comparable to nginx\footnote{\urlNginx} and
+	Phusion Passenger\footnote{\urlPassenger} for example as well as \ac{CoAP}
+	servers compatible to web frameworks written in programming languages
+	optimized for concurrency such as elixir\footnote{\urlElixir} for example.

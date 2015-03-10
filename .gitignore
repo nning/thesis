@@ -1,0 +1,14 @@
+*.acn
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.lof
+*.log
+*.lot
+*.out
+*.pdf
+*.run.xml
+*.tex.bak
+*.toc
+version.tex

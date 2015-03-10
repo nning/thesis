@@ -1,0 +1,23 @@
+digraph G {
+//	rankdir=LR;
+
+	actioncontroller_base [label="ActionController::Base [C]"];
+
+	david_railties_middleware [label="David::Railties::Middleware [C]"];
+	david_resourcediscovery [label="David::ResourceDiscovery [A]"];
+	david_resourcediscoveryproxy [label="David::ResourceDiscoveryProxy [C]"];
+	david_showexceptions [label="David::ShowExceptions [C]"];
+
+	rails [label="Rails"];
+
+
+	rails -> david_railties_middleware [label=instantiates];
+	rails -> actioncontroller_base [label=instanciates];
+
+	david_railties_middleware -> david_resourcediscoveryproxy [label=instantiates];
+	david_railties_middleware -> david_showexceptions [label=instantiates];
+
+	david_resourcediscoveryproxy -> david_resourcediscovery [label=starts];
+
+	actioncontroller_base -> david_resourcediscovery [label=message];
+}

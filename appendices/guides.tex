@@ -1,0 +1,83 @@
+\chapter{Guides}
+\label{cha:guides}
+
+\section{Basic Installation and Usage}
+
+	It is assumed that a recent version of Ruby is installed. At the time of
+	writing, Ruby 2.2.0 is the latest stable version released. Documentation
+	about how to install Ruby on different \acp{OS} can be obtained from the
+	official Ruby
+	website\footnote{\url{https://www.ruby-lang.org/en/documentation/installation/}}.
+
+	In case a new \ac{Rails} application is to be used, it is created with the
+	following command.
+
+	\begin{lstlisting}[gobble=4]
+		rails new example
+	\end{lstlisting}
+
+	If a \ac{Rails} application is existent, David can be included as a
+	dependency by including the following line into \texttt{Gemfile}.
+
+	\begin{lstlisting}[gobble=4]
+		gem 'david'
+	\end{lstlisting}
+
+	David will automatically hook into Rails to make itself the default Rack
+	handler so that \texttt{rails s} starts David by default. If the
+	application has to be used via \ac{HTTP}, WEBrick can be started by
+	executing \texttt{rails s webrick}. After the server is started, the
+	\ac{Rails} application is available at \texttt{coap://[::1]:3000/} by
+	default.
+
+	\href{https://addons.mozilla.org/de/firefox/addon/copper-270430/}{Copper}
+	is a \ac{CoAP} client for Firefox and can be used for development. The
+	\href{https://github.com/nning/coap}{Ruby coap gem} is used by David for
+	example for message parsing and also includes a command line utility (named
+	\texttt{coap}) that can also be used for development.
+
+	As \ac{CoAP} is a protocol for constrained environments and machine to
+	machine communications, returning \ac{HTML} from controllers will not be of
+	much use. \ac{JSON} for example is more suitable in that context.  David
+	works well with the default ways to handle \ac{JSON} responses from
+	controllers such as \texttt{render json:}. You can also utilize Jbuilder
+	templates for easy generation of more complex \ac{JSON} structures.
+
+	\ac{CBOR} \cite{cbor} can be used to compress \ac{JSON} documents.
+	Automatic transcoding between \ac{JSON} and \ac{CBOR} is activated by
+	setting the Rack environment option \texttt{CBOR} or
+	\texttt{config.coap.cbor} in your Rails application config to
+	\texttt{true}.
+
+\section{Running the \acf{RD}}
+
+	Clone the repository.
+
+	\begin{lstlisting}[gobble=4]
+		git clone https://github.com/nning/core-rd.git
+		cd core-rd
+	\end{lstlisting}
+
+	Install dependencies and run database migrations.
+
+	\begin{lstlisting}[gobble=4]
+		gem install bundler
+		bundle --deployment --without 'development doc test'
+
+		export RAILS_ENV=production
+		rake db:migrate
+		rake db:seed
+	\end{lstlisting}
+
+	Generate a secret token for the production environment. It has to be pasted
+	in the production section of \texttt{config/secrets.yml}.
+
+	\begin{lstlisting}[gobble=4]
+		rake secret
+	\end{lstlisting}
+
+	Start the server.
+
+	\begin{lstlisting}[gobble=4]
+		rackup
+	\end{lstlisting}

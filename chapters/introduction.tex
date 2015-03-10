@@ -1,0 +1,175 @@
+\chapter{Introduction}
+\label{cha:introduction}
+
+\section{Motivation}
+
+	The \acf{IoT} is an emerging technology for which a recent market study
+	predicts a fivefold increase in connected devices in the next five years
+	\cite{verizon} and for which the Gartner Plateau of Productivity seems
+	foreseeable \cite{hype-cycle}. With a growing maturity of this technology,
+	methodologies and best practices will develop. This work aims to bring
+	modern web development methods to server application software development
+	for the \ac{IoT}.
+
+	For the \enquote{classic web} using the \acf{HTTP} there are many web
+	frameworks making the development of web applications more productive.
+	\ac{Rails} is one framework including features that emphasize it against
+	other frameworks or web development approaches. It promotes the development
+	by \acs{REST} criteria, supports \acf{TDD} and implements many well-known
+	software engineering design patterns and methods of agile development such
+	as Active Record, \ac{CoC}, \ac{DRY} and \ac{MVC}. Additionally, the
+	\ac{Rails} community is quite vivid and there is a huge ecosystem of
+	extensions for many recurrent problems.
+
+	Current popular \ac{IoT} applications (e.g.\ Nest products) are often
+	designed being unable to work without proprietary server applications
+	provided by the vendor and jeopardize customer
+	privacy\footnote{\urlNestPrivacy}. Providing an Open Source possibility for
+	\ac{IoT} application development in a framework widely known as \ac{Rails}
+	hopefully promotes decentralization and the autonomy of users. The
+	\emph{Thin Server Architecture} proposed by M. Kovatsch et al.\ fosters
+	application layer interoperability by shifting application logic from
+	embedded devices to application servers \cite{thin-server}. Our solution
+	aims to provide easy development of application servers.
+
+	Compared to other protocols for constrained applications, \ac{CoAP} is an
+	especially interesting playground, because it addresses many shortcomings
+	from which the \ac{TCP} and \ac{HTTP} suffer even in relatively
+	unconstrained contexts. Design features such as \ac{REST} compatibility and
+	usage of elements like \acp{URI} as well as Internet Media Types make it
+	very adaptable to \ac{HTTP}.
+
+\section{Basics}
+
+	In the next subsections we will describe the basics of the technologies
+	that form the context of this work.
+
+	\subsection{\acs{HTTP} and \acs{REST}}
+
+		The \acl{HTTP} (see \cite{http-0} ff.) is an application protocol based
+		on \ac{TCP}. It uses \acp{URI} (\texttt{http://example.com/foo} for
+		example) to address certain resources on different servers (see section
+		2.7 of \cite{http-0}). For every request of (or on) a resource, a
+		\ac{TCP} session is established with a server and a method and resource
+		path (among other information) are sent (see section 3.1.1 of
+		\cite{http-0}). This session can be reused for later requests. Several
+		methods are defined in section 4 of \cite{http-1}. The most important
+		one is probably \texttt{GET} which is used to retrieve a resource
+		representation. The server synchronously answers with a status code
+		that describes the result of the requested operation and the
+		representation of the requested resource (see section 3.1.2 of
+		\cite{http-0}). Subsequently, the \ac{TCP} session is closed if there
+		were no further requests in a timeout interval. The protocol
+		information in the header is text based -- as opposed to binary -- and
+		extended by numerous other internet standards.
+
+		\acf{REST} is an architectural style facilitating a set of
+		\enquote{interaction constraints} that can be applied to \ac{HTTP} but
+		also to other protocols to achieve \enquote{scalability of component
+		interactions, generality of interfaces}, to \enquote{reduce interaction
+		latency}, and \enquote{enforce security} (see section 5 of
+		\cite{rest}). It was defined by Roy Thomas Fielding, one of the
+		original authors of \ac{HTTP}. One of the constraints is the usage of
+		standard \ac{HTTP} methods (e.g.\ \texttt{GET}, \texttt{POST},
+		\texttt{PUT}, and \texttt{DELETE}) for interface generality. Another
+		important constraint is statelessness which means that \enquote{each
+		request from client to server must contain all of the information
+		necessary to understand the request}. A resource (identified by a
+		\ac{URI}) can be represented in different formats; clients are able to
+		choose the format most suitable.
+
+	\subsection{\acl{Rails} and Rack}
+
+		% TODO	This paragraph is very similar to the Rails intro in Motivation.
+
+		\acl{Rails} \enquote{is an open-source web framework that's optimized
+		for programmer happiness and sustainable productivity} \cite{rails}. It
+		is designed in a way that eases web application development by
+		\ac{REST} criteria. Many well-known software engineering design
+		patterns and methods of agile development such as Active Record,
+		\acl{CoC}, \acl{DRY} and \acl{MVC} are incorporated into the framework.
+		\acl{TDD} is well supported by \ac{Rails} and widely adopted among
+		programmers using \ac{Rails}. The \ac{Rails} community is quite vivid
+		and there is a huge ecosystem of extensions for many recurrent
+		problems.
+
+		Since version 2.3, \ac{Rails} supports the Rack web server interface
+		\cite{rack}. Many other Ruby web frameworks specialized on different
+		aspects are also compatible to that interface (e.g.\ \emph{Sinatra}
+		\cite{sinatra}, \emph{Grape} \cite{grape}). For a more detailed
+		introduction to Rack, refer to an article written by Christian
+		Neukirchen (the original author) \cite{rack-intro}.
+
+	\subsection{\acl{IoT} and \acs{CoAP}}
+		
+		The \acf{IoT} consists of embedded devices connected to the Internet in
+		a wired or wireless manner. Software on embedded devices cannot rely on
+		many resources in terms of the \ac{CPU}, \ac{ROM}, and \ac{RAM}. We
+		will mostly use the term \emph{\acl{IoT}}, because it is more general
+		than other similar terms like \emph{Web of Things} and \emph{Wireless
+		Embedded Internet}.
+
+		The \acf{CoAP} is a protocol based on \acs{UDP} specifically designed
+		for use with constrained nodes and networks \cite{coap}
+		\cite{coap-paper}. It incorporates successful design elements also
+		used in \ac{HTTP} such as \acp{URI} and Internet Media Types and aims
+		to realize the \ac{REST} architecture. In contrast to \ac{HTTP},
+		\ac{CoAP} is not necessarily synchronous. There are no long-lasting
+		connections, and responses can be sent independently of requests. This
+		enables features such as multicast support \cite{coap-group} and
+		server-sent notifications on resource changes (called \emph{Observe},
+		see \cite{observe}). Because of those and other features such as
+		built-in discovery and the \acf{RD} draft \cite{rd}, it is particularly
+		suited for \ac{M2M} communications. The \emph{Block} extension
+		\cite{block} allows transfer of resource representations larger than
+		the maximum payload of a \ac{CoAP} message (about 1 KiB).
+
+		In order to make a Rack compatible application available to \ac{CoAP}
+		capable clients, it has to be translated between the \ac{HTTP} centric
+		Rack interface and \ac{CoAP}. This translation has to be applied to
+		headers, payloads, and also to more advanced protocol features.
+
+\section{Research Questions}
+	\label{cha:intro:questions}
+
+	The aim of this work is to answer the following question:\\
+
+	\emph{To which extent is it possible to use web application frameworks for
+	\acs{HTTP} such as \acl{Rails} in the \acl{IoT} utilizing \acs{CoAP}?}\\
+
+	% TODO	It's not either ... or.
+	\noindent
+	More specific questions implied by the main research question can either be
+	related to the \emph{\ac{CoAP} server} or to \emph{Protocol
+	translations}.\\
+
+	\noindent
+	The \ac{CoAP} server handles requests from the network, translates between
+	\ac{HTTP} and \ac{CoAP} specifics and interfaces with the web application
+	framework via Rack. More specific research questions are:
+
+	\begin{enumerate}
+		\item How can the \acf{CoAP} be implemented?
+		\item How to handle a huge amount of \ac{IoT} devices?
+		\item Does the Rack interface comply with the characteristics of
+			\ac{CoAP}?
+		\item How can a later integration of transport encryption with
+			\ac{DTLS} \cite{dtls} be supported?
+	\end{enumerate}
+
+	\noindent
+	Incoming requests and outgoing responses have to be translated between what
+	the Rack interface (which is designed for \ac{HTTP}) expects and the
+	\ac{CoAP} protocol specifics.
+
+	\begin{enumerate}
+		% TODO	"Wir benutzen ein HTTP-Interface, um CoAP
+		%		Protokollinteraktionen zu steuern"
+		\item How can headers be translated between \ac{HTTP} and \ac{CoAP}?
+		\item How can payload formats be translated between their suitable
+			fields of application?
+		\item Is the \ac{CoAP} Resource Discovery (see section 7.2 of
+			\cite{coap}) implementable transparently for the Rack application?
+		\item Can a \acf{RD} \cite{rd} be realized with the created software?
+		\item Is it possible to support Observe \cite{observe}?
+	\end{enumerate}

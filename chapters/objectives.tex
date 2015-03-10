@@ -1,0 +1,160 @@
+\chapter{Objectives}
+\label{cha:objectives}
+
+Corresponding to the primary research question stated in
+\autoref{cha:intro:questions}, the higher objective of our work is to determine
+the possibility of using Rack based web frameworks originally designed for
+\ac{HTTP} in the \ac{IoT} utilizing \ac{CoAP}. We utilize \acf{TDD} for the
+software components. There are also some general design goals to the code such
+as code quality, modularity, and sustainability through readability and a high
+test coverage for example.
+
+\section{\acs{CoAP} Server}
+
+	\subsection{Protocol Implementation}
+
+		As already shown in \autoref{cha:background:coap:implementations},
+		there are numerous different implementations of the \acf{CoAP} in many
+		programming languages and with differing design goals. We will examine
+		some of them to determine the implementation to base the server
+		developed during this work on. The support for a recent standard
+		version \cite{coap} and extensions for observing resources
+		\cite{observe} and block-wise transfers \cite{block} is particularly
+		important. We will analyze and design different aspects of the protocol
+		such as Message Correlation and Deduplication as well as different
+		response types from a server's perspective and implement them
+		accordingly. General design goals are the robustness and
+		interoperability of the \ac{CoAP} implementation.
+
+	\subsection{Concurrency and Performance}
+	\label{cha:objectives:concurrency}
+
+		For the handling of frequent sensor data updates from a huge number of
+		\ac{IoT} devices, the concurrency model has to be chosen fittingly.
+		Concurrent handling of requests is therefore one design goal of the
+		server implementation. We will analyze which models are viable for
+		applications in the \ac{IoT} and how possible models integrate with
+		\ac{Rails}. Neither the server itself, nor the \ac{CoAP} implementation
+		or the application framework may block the concurrent handling of
+		further requests. For a realistic objective for the concurrency level
+		and the maximum number of requests per second of the implementation,
+		benchmarks of other implementations should provide for an overview. It
+		is important to consider the comparability of different benchmarks, as
+		they differ at least on two levels: First, the hardware configurations
+		range from ultra-portable, energy-saving developer notebooks, to
+		several full-fledged, high-end servers. Secondly, the choice of
+		frameworks for testing is important. A benchmark testing a plain Hello
+		World Rack application is not comparable with its \ac{Rails} or
+		\emph{Sinatra} counterpart, because of the framework overhead. For this
+		work, only the server performance has to be measured, so benchmarking
+		different web servers on several Ruby VMs serving a plain Hello World
+		Rack application would be of most value. The server implemented during
+		this work does not have to scale as well as \emph{Californium} for
+		example, which according to a paper among others written by
+		\emph{Californiums} original author Matthias Kovatsch handles almost
+		400,000 requests per second \cite{cf-scale} via \ac{CoAP} on server
+		hardware. For Ruby applications, those values are reachable over
+		\ac{HTTP} with server stacks not written in Ruby such as TorqBox on
+		JRuby or nginx proxying Unicorn on \ac{MRI} for
+		example\footnote{\urlRubyWebBenchOne}. With \ac{HTTP} web servers
+		written in Ruby running plain Rack applications (no further frameworks
+		like \ac{Rails}) scale up until approximately 7.600 requests per
+		second\footnote{\urlRubyWebBenchTwo}, so it is expected that with
+		\ac{CoAP} this number could be improved in comparison to \ac{HTTP}. For
+		a server scaling this well still much optimization work has to be done,
+		which is not the focus of this work. The more conservative number of
+		5.000 requests per second shall be aimed at, for now. Implicated
+		objectives by these performance goals are the portability of the server
+		and the \ac{CoAP} implementation to other Ruby \acp{VM} than \ac{MRI},
+		such as JRuby for example, and the choice of a server concurrency model
+		which scales well with the provided hardware.
+
+	\subsection{Rack Interface}
+
+		As many other Ruby web frameworks, \ac{Rails} interacts via the Rack
+		interface with the web server. The main targeted web application
+		framework will be \ac{Rails} but the server implementation shall also
+		be tested against different other Rack middlewares and application
+		frameworks. It shall be clarified in which extent this interface
+		suffices for the characteristics of the \acf{CoAP}. The translation
+		between the Rack interface based on \ac{HTTP} and \ac{CoAP} has to
+		function seamlessly and be as complete as possible.
+
+	\subsection{\acs{DTLS}}
+
+		The server has to be designed to allow the integration of \ac{DTLS}
+		\cite{dtls} as a means of transport encryption. We do not pursue an
+		actual implementation. The implications of \ac{DTLS} in the context of
+		this work shall be examined. Functionality such as observe or certain
+		Rack middleware might possibly be derogated.
+
+\section{Protocol Translations}
+
+	% TODO	Intro
+
+	\subsection{Headers and Payload Formats}
+
+		% TODO	Lengthen JSON/CBOR
+
+		The software implemented during this work shall enable an integrated
+		development of applications for the traditional, human-readable web and
+		machine-to-machine communication in the \ac{IoT}. It will be clarified
+		how the \ac{HTTP} and \ac{CoAP} Content Negotiation protocols (see
+		section 5.3 of \cite{http-1} and 5.5.4 of \cite{coap}) can be utilized
+		for the purpose of separating those client groups from a developers
+		perspective in \ac{Rails}. Other functionality of \ac{HTTP} based upon
+		headers applicable to \ac{CoAP} shall also be preserved using an
+		appropriate translation of the headers (for example the \texttt{ETag}
+		header which is defined in section 2.3 of \cite{http-2}). Also the
+		implications of a transparent content type mapping for responses by the
+		web framework between a data serialization format of the traditional
+		web and more resource-saving ones for the \ac{IoT} will be emphasized.
+		A transcoding of resource representation formats between \ac{JSON}
+		\cite{json} and \ac{CBOR} \cite{cbor} will be implemented.
+
+	\subsection{Resource Discovery and Observe}
+
+		Furthermore, special properties of \ac{CoAP} such as the Resource
+		Discovery (see section 7.2 of \cite{coap}) and Observe \cite{observe}
+		will be considered and integrated appropriately. The Resource Discovery
+		shall be integrated into the web framework (for example \ac{Rails})
+		without any developer interaction for resources for which a interaction
+		with \ac{CoAP} is reasonable. The functionality of an \ac{RD} \cite{rd}
+		shall be facilitated by pre-implemented, configurable, and well-tested
+		modules. It will also serve as application to demonstrate the
+		implementation properties. In order to support Resource Discovery and
+		the implementation of an \ac{RD}, Group Communication for the \ac{CoAP}
+		\cite{coap-group} will be integrated. Additionally, a way to integrate
+		the asynchronous nature of Observe and the rather synchronous ones of
+		Rack and \ac{Rails} will be designed and implemented. 
+
+\section{Evaluation}
+
+	For the evaluation, it shall be analyzed to which extent the specified
+	goals of functionality are met, how the performance of the implementation
+	compares to related work and how \ac{Rails} developers respond to given
+	tasks in connection with the developed software modules.
+
+	Unit tests emerge during the \acf{TDD} that cover most parts of the
+	implementation source code and that specify and inspect the functionality
+	of individual modules, classes and methods of the different components. The
+	coverage of source code by tests (\emph{Code Coverage}) will be measured.
+	For the demonstration application, unit, functional and integration tests
+	shall be created that besides testing the application itself also
+	demonstrate \ac{TDD} on the covered software stack with methods common in
+	\ac{Rails}. The \ac{CoAP} library will be tested for its interoperability
+	with other implementations in an automated way.
+
+	The \ac{CoAP} server will be compared to other implementations by
+	performance tests. In doing so we will also measure the consumption of
+	resources. We will also compare the performance of different Rack based
+	frameworks in connection with the server. For the applicability of the
+	complete stack for the usage of control nodes in home automation networks,
+	a test installation will be made on home router hardware. The data gained
+	by the performance tests will be used to reflect on design decisions as the
+	kind of solution for the realization of the \ac{CoAP} server.
+
+	To evaluate the developer friendlyness and the seamlessness of the
+	integration in \ac{Rails}, experienced Rails developers are going to be
+	interviewed after they solved a given task. This task shall contain
+	\ac{CoAP} specifics that the developers do not necessarily know of.

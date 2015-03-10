@@ -1,0 +1,53 @@
+digraph G {
+	rankdir=LR;
+
+	coap_block [label="CoAP::Block [C]"];
+	coap_coding [label="CoAP::Coding [M]"];
+	coap_message [label="CoAP::Message [C]"];
+
+	david_constants [label="David::Constants [M]"];
+	david_garbagecollector [label="David::GarbageCollector [A]"];
+	david_mapping [label="David::Mapping [M]"];
+	david_midcache [label="David::MidCache [M]"];
+	david_multicast [label="David::Multicast [M]"];
+	david_observe [label="David::Observe [A]"];
+	david_options [label="David::Options [M]"];
+	david_request [label="David::Request [C]"];
+	david_respond [label="David::Respond [M]"];
+	david_server [label="David::Server [A]"];
+	david_utility [label="David::Utility [M]"];
+
+	rack_handler_david [label="Rack::Handler::David [C]"];
+
+	rails [label="Rails"];
+
+
+	rails -> rack_handler_david [label=instanciates];
+
+	rack_handler_david -> david_server [label=starts];
+	rack_handler_david -> david_observe [label=starts];
+	rack_handler_david -> david_garbagecollector [label=starts];
+
+	david_observe -> david_server [label=messages];
+
+	david_server -> david_midcache [label=includes];
+	david_server -> david_multicast [label=includes];
+	david_server -> david_options [label=includes];
+	david_server -> david_respond [label=includes];
+
+	david_server -> coap_message [label=instantiates];
+	david_server -> david_request [label=instantiates];
+
+	david_request -> coap_block [label=instantiates];
+	david_request -> coap_message [label=wraps];
+
+	david_respond -> coap_coding [label=includes];
+	david_respond -> coap_message [label=instantiates];
+	david_respond -> david_constants [label=includes];
+	david_respond -> david_mapping [label=includes];
+	david_respond -> david_observe [label=messages];
+	david_respond -> david_utility [label=includes];
+
+	david_garbagecollector -> david_observe [label=messages];
+	david_garbagecollector -> david_server [label=messages];
+}

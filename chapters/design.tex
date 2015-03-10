@@ -1,0 +1,1093 @@
+\chapter{Design}
+\label{cha:design}
+
+The main component being developed through this work is a \ac{CoAP} server able
+to serve responses from frameworks compatible to the Rack interface. Section
+\ref{cha:design:server} discusses interfaces, libraries and the concurrency
+model, and \autoref{cha:design:protocol} analyzes translations between the
+\ac{HTTP} and \ac{CoAP} protocols.
+
+\section{\acs{CoAP} Server}
+\label{cha:design:server}
+
+	The code will be modularized with mixins (Ruby modules included in
+	classes), because these need less memory compared to the instantiation of
+	classes. Where tuples of data are needed (as keys for the message
+	deduplication cache, for example), structs were considered instead of
+	dynamically growing types like arrays. However, a performance advantage of
+	structs could not be measured (see
+	\href{https://github.com/nning/david/blob/master/experiments/structs.rb}{\texttt{experiments/structs.rb}}
+	of the david repository). On \ac{MRI}, both Arrays and Structs are
+	implemented in C.
+
+	\subsection{Rack Interface}
+	\label{cha:design:server:rack}
+
+		The stable Rack version used in development is
+		1.6.0\footnote{\urlRack}. As a source of the Rack interface
+		specification the version from the current master branch \cite{rack} is
+		referenced here, because it was not possible to find a readably
+		formated version of the specification for Rack 1.6.0.
+		
+		From the servers perspective, on the Rack side only the environment has
+		to be provided correctly and completely and the application's
+		\texttt{call} method has to be invoked with that environment on
+		incoming requests. The \texttt{call} invocation returns the described
+		\texttt{Array}, which contains values specific to \ac{HTTP} and
+		therefore has to be translated to \ac{CoAP}. For details on the
+		translation of incoming \ac{CoAP} messages and outgoing Rack responses
+		see \textref{cha:design:protocol}. There are Rack specific environment
+		options which are used to pass in objects for input, errors, or for
+		\emph{hijacking} the socket (see \textref{cha:design:protocol:observe})
+		and options for concurrency for example. An exemplary Rack environment
+		is given in \autoref{lst:rack:env} as a Ruby Hash. A more detailed
+		description of the requirements of the Rack environment is given in its
+		specification \cite{rack}.
+
+		\begin{figure}
+			\begin{lstlisting}[gobble=8,caption={Exemplary Rack environment},label=lst:rack:env]
+				{
+					'REMOTE_ADDR'       => '::1',
+					'REMOTE_PORT'       => '41414',
+					'REQUEST_METHOD'    => 'GET',
+					'SCRIPT_NAME'       => '',
+					'PATH_INFO'         => '/.well-known/core',
+					'QUERY_STRING'      => 'href=test',
+					'SERVER_NAME'       => '::',
+					'SERVER_PORT'       => '5683',
+					'HTTP_ACCEPT'       => 'application/json',
+					'rack.version'      => [1, 2],
+					'rack.url_scheme'   => 'http',
+					'rack.input'        => #<StringIO:0x007f3d48021570>,
+					'rack.errors'       => #<IO:<STDERR>>,
+					'rack.multithread'  => true,
+					'rack.multiprocess' => true,
+					'rack.run_once'     => false,
+					'rack.logger'       => #<Logger:0x007f3d644e52e8>
+				}
+			\end{lstlisting}
+		\end{figure}
+
+		Choosing the server when running from Rack configuration files
+		(\texttt{config.ru}) or when starting the server in a \ac{Rails}
+		project for example is possible by providing a Rack handler for the
+		\ac{CoAP} server and registering it. After registration, the desired
+		handler can be chosen with a parameter to \texttt{rackup} or
+		\texttt{rails server}. A Ruby code example of a basic Rack handler
+		prototype is shown in \autoref{lst:rack:handler}. The handler from the
+		example would be started by \texttt{rackup -s example} or \texttt{rails
+		s example}.
+
+		\begin{figure}
+			\begin{lstlisting}[gobble=8,caption={Rack handler prototype},label=lst:rack:handler]
+				# The Rack library is required.
+				require 'rack'
+
+				# Namespace for register method.
+				module Rack::Handler
+					# The custom handler class.
+					class ExampleHandler
+						def self.run(app, options = {})
+							# Blockingly start actual server..
+						end
+					end
+
+					# Register handler class as 'example'.
+					register(:example, ExampleHandler)
+				end
+			\end{lstlisting}
+		\end{figure}
+
+		The \texttt{.well-known/core} interface (see \cite{link} and section
+		7.2 of \cite{coap}) could be implemented as a Rack middleware. A
+		default \ac{Rails} application contains already numerous Rack
+		middlewares for many possible purposes, some of them not applicable to
+		\ac{CoAP} based communications. \texttt{ActionDispatch::Cookies} for
+		example manages \ac{HTTP} Cookie handling. For now, we do not provide
+		any \ac{CoAP} features that are translated to \ac{HTTP} using Cookies.
+		It has to be evaluated if the removal of this middleware actually
+		breaks code which might be useful in the context of constrained
+		application development. \texttt{ActionDispatch::DebugExceptions}
+		renders exceptions as \ac{HTML}, which is way to verbose for
+		development with a \ac{CoAP} client. Both these examples and other
+		middleware are not needed. Therefore a way has to be found to
+		deactivate unessential middleware in a \ac{Rails} \ac{CoAP}
+		application. With a component called Railtie \cite{railtie} it is
+		possible to run code from a gem upon initialization of a \ac{Rails}
+		application and to provide configuration options which can be used from
+		inside the applications configuration files. The middleware cleanup can
+		be configurable through a Rails option. A middleware catching
+		exceptions thrown in a Rack application and converting them to a
+		description for the programmer (\ac{JSON} for example) would support
+		the development process. For Rails, such a middleware exists with
+		\texttt{ActionDispatch::ShowExceptions} but it does not support
+		including exception details in the \ac{JSON} body.
+		
+		A \texttt{Rack::Lint} class instance can be inserted into the
+		middleware stack to automatically test the Rack environment for
+		conformity to the Rack specification \cite{rack}.
+
+	\subsection{Protocol Implementation}
+	\label{cha:design:server:coap}
+
+		% TODO	More on server protocol implementation goals.
+		% TODO	More design in relation to goals.
+		% TODO	Structure
+		% TODO	Vertiefung (e.g. FSM, etc.)
+
+		The Rack interface has to be pure Ruby code in any case, so it is
+		suggested to also use a protocol implementation integratable into Ruby.
+		Compared to other languages, it is possible to include C/C++ and Java
+		code easily and without indirections like socket communications and
+		serialization to connect a non-Ruby component with a Ruby one.
+		\autoref{table:background:coap:libraries} gives an overview of
+		compatible \ac{CoAP} libraries in different languages. So even though
+		the server implementation in another language could promise performance
+		benefits (see \autoref{cha:design:server:concurrency}), a Ruby solution
+		is preferred here. Both C/C++ and Java tie the Ruby \ac{VM} down to a
+		solution written in the respective language. Using a \ac{CoAP}
+		implementation in C/C++ would require to write a wrapper C extension
+		which uses the Ruby \ac{API} to expose the functions to Ruby code. This
+		makes the usage in JRuby impossible, since as of JRuby 1.7 the C
+		extension support is deprecated\footnote{\urlJRubyCExt}. On the other
+		hand, a \ac{CoAP} implementation in Java will not run in any Ruby
+		\ac{VM} outside of a Java \ac{VM}.
+
+		A pure Ruby implementation of \ac{CoAP} can be based upon an existing
+		message parser written by Carsten Bormann, as it was done in the
+		\emph{SAHARA}\footnote{\urlSaharaOne}\textsuperscript{,}\footnote{\urlSaharaTwo}
+		and \emph{GOBI}\footnote{\urlGobi} projects of the communication
+		networks research group (AG Rechnernetze\footnote{\urlAgrn}) at the
+		Universität Bremen. The \emph{GOBI} implementation has been published
+		on github.com\footnote{\urlGobiCoap} and features client functionality,
+		basic block-wise transfer and observe support. But it requires some
+		refactoring work to meet the objectives of this work such as code
+		quality and non-existence of side effects for concurrency support. The
+		Code Climate report\footnote{\urlGobiCoapCC} on the library lists
+		highly complex classes and much code duplication (both indicating a bad
+		structure), and many "code smells" (indicating non-conformance to the
+		basic commonalities of Ruby style guides \cite{ruby-style} for
+		example). As of the current commit
+		(\href{https://github.com/SmallLars/coap/commit/1cd124427b57e84543f3ee6ff2d9148e8499393a}{1cd1244})
+		in its git repository, the code climate scores 0.7 (with 4.0 being the
+		best possible result) and the test coverage as measured by coveralls.io
+		amounts to 88.19\%. Arguments for forking this library and developing
+		it further under this name are that it is already present on
+		rubygems.org as \emph{coap} and that it enables quick prototyping.
+		Although we can not be sure, the code developed during this thesis can
+		be merged back again into the original project.
+		
+		As a \ac{CoAP} \textbf{server} implementation is needed in the context
+		of this work, one of the implementation goals regarding the fork of
+		this library is making it usable in the context of a server.
+		Abstraction and modularization to enable code reuse and testability are
+		methods to accomplish that. The current client behavior is contained
+		in one huge method that is called recursively in some cases. One case,
+		for example, is the assembly of single block-wise \ac{CoAP} messages.
+		There are recursion limits to hinder huge resource consumption that are
+		also preventing more than 10 outgoing and more than 50 incoming blocks.
+		Sending, receiving, retransmissions, parsing, reassembly of block-wise
+		transfers, and other protocol states or operations can be organized in
+		a transmission layer (documented for example as finite state machines
+		in the \ac{CoAP} Implementation Guidance draft \cite{coap-guide}) that
+		is reusable by the server, thus avoiding code duplication. Same goes
+		for other common functionality such as utilities for handling
+		block-wise transfer \cite{block}. A more close implementation of the
+		\ac{CoAP} protocol is a further implementation goal that has several
+		advantages.  By improving matching and generation of message IDs and
+		tokens, security and reliability can be enhanced. With avoidance of
+		computation on bogus messages, application state both on the server and
+		client side can be minimized. The \ac{API} of the client is planned to
+		be cleaned up and simplified. For example, the port argument should be
+		optional for requests; obviously, the \ac{CoAP} default port can be
+		used, if the argument was omitted. As the server aims for portability
+		between Ruby \acp{VM}, also the common library and client component
+		have to support them. \emph{Celluloid::IO} \cite{celluloid-io}, which
+		is described more detailed in the following section, can not only be
+		used for the server, but also for the client to realize non-blocking
+		socket operations. To further support concurrency, the client and
+		common library code will be revised regarding to globally shared state
+		and side effects. Tests for the server component are intended to be
+		implemented utilizing RSpec \cite{rspec}. New tests for the client
+		component will also be written in RSpec and some of the old tests will
+		be ported during the development. For the client, test goals consist of
+		increasing the test coverage (for example through modularization),
+		decoupling of existing tests from remote hosts, and increasing testing
+		speed. Only optional integration or protocol implementation
+		compatibility tests should remain dependent on remote hosts. For the
+		Resource Discovery (see section 7 of \cite{coap}) both on server and
+		client side, the \ac{CoRE} Link Format \cite{link} which describes
+		(available) \ac{CoAP} resources is necessary to be implemented.
+
+		\subsubsection{Duplicate Detection and Message Correlation}
+
+			The server will send cached response messages on requests
+			identified as duplicates (see section 4.5 of \cite{coap}). Old
+			entries in the response cache have to be \enquote{garbage
+			collected}. The cache used can also be utilized for the correlation
+			of answers to sent messages. As the message receiving, parsing and
+			dispatching happens in a single threaded event loop, the cache can
+			be accessed without locking. However, other threads such as the
+			garbage collector for example need to access the cache
+			concurrently. This can be accomplished in a thread safe manner by
+			using messaging among actors. A simple implementation of this cache
+			could utilize a Ruby Hash with endpoint address and message ID as
+			keys and the message and a timestamp for retransmissions and
+			garbage collection as values. Optimizations are discussed in
+			\autoref{cha:design:server:concurrency}. Retransmission of
+			\texttt{CON} messages that received no \texttt{ACK} or \texttt{RST}
+			answer in a certain time can be handled by another thread operating
+			on the mentioned cache. Additionally, the cache has to include a
+			timeout and a retransmission count per entry to keep track of
+			retransmissions (see section 4.2 of \cite{coap}). However, if the
+			server does not send any confirmable messages, it does not have to
+			perform retransmissions.
+
+		\subsubsection{Separate Responses}
+		\label{cha:design:server:coap:separate}
+
+			If the response to a confirmable request takes longer than the
+			retransmission timeout of the client, separate responses can be
+			used to prevent a retransmission (see section 5.2.2 of
+			\cite{coap}). Support for separate responses requires a possibility
+			to run application code in the background and to later send the
+			resulting response message. When using Rack with \ac{HTTP}, the
+			server has to keep a connection alive and later send an
+			asynchronous response. Therefore this response has to be passed to
+			the server. Some methods to pass an asynchronous response to the
+			server have been developed in the Rack community. \emph{Rack
+			hijack} (see \autoref{cha:design:protocol:observe}) is the only one
+			being part of the Rack specification \cite{rack}. Providing a
+			Proc-like as value to the Rack environment key
+			\texttt{async.callback} is another method that was integrated into
+			\emph{Thin} \cite{thin}. Through \texttt{throw :async} or a
+			special Rack response (\texttt{[-1, \{\}, []]}) it is signalled
+			that the response is obtained via the \texttt{async.callback}.
+			Another method implemented in \emph{Thin} is a \enquote{deferrable
+			body} object\footnote{\urlThinDeferrableBody}. In each of these
+			cases, the middleware used must be aware or is otherwise
+			circumvented\footnote{\urlRackAsync}. \emph{Rack hijack} suffers
+			from the same problem. \emph{Reel} -- interesting because also
+			based on \emph{Celluloid} -- does not have a solution to this
+			problem that works with the Rack interface.
+			
+			As \ac{CoAP} is not constrained to keep a connection alive, there
+			is another way of implementing separate responses that is also
+			mentioned in section 5.2.2 of \cite{coap}. Before initiating the
+			generation of a response by the application, the server can start a
+			timeout. When the timeout finished before a response is available,
+			the server sends an empty \texttt{ACK} message indicating a
+			separate response. The actual response generated by the application
+			then has to be sent as a confirmable or non-confirmable message. A
+			method can be provided with which an application programmer can
+			immediately signal a separate response if a long response time is
+			foreseeable.
+
+			\autoref{lst:coap:separate} shows an exemplary source code from the
+			application programmer's side. The call of the \texttt{separate}
+			method would send an immediate response to the client by messaging
+			the server actor. To actually asynchronously run the code, the
+			block and the controller instance is passed to a separate
+			\emph{Celluloid} actor. This single actor or actor from a thread
+			pool would then \texttt{call} the block in the context of the
+			controller instance. The instance would have to persist until the
+			asynchronous code finished running. The controller response would
+			have to be translated like it is in a piggybacked case. The timeout
+			method mentioned in the previous paragraph enables also the
+			separate answer passing the Rack middleware stack but the
+			generation of the response is happening synchronously. For the
+			\texttt{seperate} method extension it has to also be ensured, the
+			response is passing the Rack middleware stack.
+
+			% TODO	Does the separate answer pass the middleware stack?
+
+			\begin{figure}
+				\begin{lstlisting}[gobble=10,caption={Seperate Response},label={lst:coap:separate}]
+					class ThingsController < ApplicationController
+						def show
+							separate do
+								render json: Thing.find(params[:id])
+							end
+						end
+					end
+				\end{lstlisting}
+			\end{figure}
+
+	\subsection{Concurrency and Performance}
+	\label{cha:design:server:concurrency}
+
+		% TODO	Revise text and add details.
+		% TODO	Why single threaded, event loop, non-blocking?
+		% TODO	Benchmark prototype measurements.
+
+		To meet the performance objectives of this work (as stated in
+		\autoref{cha:objectives:concurrency}), some consideration is necessary.
+		As layed down in \autoref{cha:background:concurrency}, we will use
+		\emph{Celluloid} \cite{celluloid} as concurrent object
+		\enquote{framework} and the \emph{Celluloid::IO} \cite{celluloid-io}
+		reactors for receiving from sockets.
+
+		There are different web server architectures. We choose a \ac{SPED}
+		architecture \cite{sped} for its reasonable performance and scalability
+		as well as its ease of implementation. Some experiments were conducted
+		with different message handling models that are documented in
+		\href{https://github.com/nning/david/blob/0.4.3/experiments/concurrency/stub.rb}{\texttt{experiments/concurrency/stub.rb}
+		inside the David source code repository}. Message handling, parsing,
+		and dispatching happens inside an asynchronous event loop run from a
+		\emph{Server} actor of which a single instance (thread) is existent.
+		\emph{Celluloid::IO} abstracts the I/O selection independent from the
+		\ac{OS} using \emph{nio4r}\footnote{\urlNio}. We avoided the frequent
+		use of asynchronous method calls with \emph{Celluloid's} \texttt{async}
+		through Fibers (for example for the dispatch method) as it is creating
+		an overhead with every request. The Rack framework call to get a
+		response to a request also happens inside the main event loop. With
+		this way of message handling it is important that the framework or the
+		application programmer does not do blocking I/O operations, because
+		they stop other requests being processed. In the Rack application or
+		framework, non-blocking database adapters have to be used. \ac{Rails}
+		for example ships \emph{ActiveJob} as a component to easily integrate
+		asynchronous operations since version 4.2.
+
+		\begin{figure}
+			\begin{center}
+				% {\scalefont{0.75}
+					\begin{sequencediagram}
+						\newinst   {c}{Client}
+						\newinst[2]{s}{\emph{Server} actor}
+						\newinst   {o}{\emph{Observe} actor}
+						\newinst[1]{a}{Rack application}
+
+						\begin{sdblock}{\emph{Observe tick}}{}
+							\begin{call}{o}{respond}{s}{}
+								\begin{call}{s}{call}{a}{200, "Bar"}
+								\end{call}
+							\end{call}
+
+							\mess{o}{2.05, "Bar", observe: 2}{c}
+						\end{sdblock}
+					\end{sequencediagram}
+				% }
+			\end{center}
+			\caption[Exemplary actor interaction on \emph{Observe
+				tick}]{Exemplary actor interaction on \emph{Observe tick}. The
+				\emph{Observe} actor receives the Rack application response
+				from the \emph{Server} actor and subsequently notifies the
+				client about a change of the resource representation.}
+			\label{img:server:actor:interaction}
+		\end{figure}
+
+		Another use case for a \emph{Celluloid} actor is the management of
+		observe \cite{observe} register, deregister and notification
+		operations. In \autoref{img:server:actor:interaction}, an exemplary
+		communication flow between the \emph{Server} and \emph{Observe} actors
+		is shown. The graph describes actions performed to handle observe
+		notifications in a certain interval. For a more detailed view on the
+		design regarding observe, refer to
+		\textref{cha:design:protocol:observe}. The \emph{Observe} actor calls
+		the Rack application to determine if the resource representation
+		changed. This happens from the \emph{Observe} actor's thread
+		concurrently to the \emph{Server} thread. The framework and the
+		application programmer have to ensure that every data access is thread
+		safe. \ac{Rails} itself is capable of multiple threads concurrently
+		calling for a framework response. However, version 4.2 uses a Rack
+		middleware called \texttt{Rack::Lock} that locks out concurrent
+		framework response calls. This can be deactivated with the Rack
+		environment option \texttt{rack.multithread} set to \texttt{true}. We
+		will deactivate \texttt{Rack::Lock} and allow concurrent framework
+		response calls by default in the server software.
+		
+		A \emph{GarbageCollector} actor removes obsolete entries from the
+		message deduplication cache and the list of observers (see
+		\autoref{cha:design:protocol:observe}). The cache is placed as a Hash
+		instance variable inside the \emph{Server} actor and can be accessed
+		from other actors through messages. This ensures thread safe retrieval
+		and update of cache entries. Performance tests during the development
+		of the concurrency architecture of the server software showed that
+		accessing the cache through \emph{Celluloid} actor messaging has to be
+		used thrifty. Placing the cache in a separate actor and performing the
+		main lookups and cache inserts via messaging from the \emph{Server}
+		actor had a negative performance impact of over 500 requests per second
+		(presumably through the messaging overhead). In JRuby 1.7 this overhead
+		is even bigger since it implements fibers through \ac{OS}
+		threads\footnote{\urlJrubyFiber}. In \ac{MRI} (at least until 2.3) the
+		standard library Hash class neither is thread safe nor does it support
+		concurrent retrieval or update \cite{ruby-thread2}. With a \ac{GIL}
+		assuring only one thread running at a time at least thread safety is
+		not a problem \cite{ruby-thread1}. JRuby supports several threads
+		running concurrently and implements updating instance variables in a
+		thread safe manner\footnote{\urlJrubyThreadsafe}. So in both \ac{MRI}
+		and JRuby, the standard library Hash class should suffice when it comes
+		to conflict free concurrent access. As described in
+		\autoref{cha:background:coap:concurrency}, \emph{Californium} uses a
+		Hash class supporting concurrent retrieval and updates for performance
+		reasons. Adopting a concurrent Hash class for Ruby may also optimize
+		performance. The \emph{thread\_safe} gem\footnote{\urlGemThreadsafe}
+		provides different thread safe data structures that are Ruby \ac{VM}
+		independent. It includes a hash-like object called
+		\texttt{ThreadSafe::Cache} which according to the README file has
+		\enquote{much better performance characteristics esp. under high
+		concurrency}. However, we could not measure a performance gain compared
+		to the Ruby standard library Hash (see
+		\href{https://github.com/nning/david/blob/master/experiments/thread\_safe.rb}{\texttt{experiments/thread\_safe.rb}
+		in the server's respository}\footnote{\urlDavid}). As structures, both
+		a Hash with two element Arrays (endpoint and message ID) as keys, and a
+		nested Hash (\texttt{\{endpoint => \{mid => value\}\}}) were
+		considered. Although the latter performs better in a detached
+		experiment (see
+		\href{https://github.com/nning/david/blob/master/experiments/hash\_key.rb}{\texttt{experiments/hash\_key.rb}}),
+		we could not measure performance benefits in the overall benchmarking
+		of the server (see the \texttt{mid\_cache\_nested\_hash} branch).
+		According to the analysis of \ac{MRI} 2.2 in
+		\citetitle{ruby-microscope} the performance of arbitrary objects as
+		Hash keys depends on the quality of their \texttt{\#hash} instance
+		method (see Experiment 7-3 of \cite{ruby-microscope}). Like other
+		objects, Arrays inherit a well-working \texttt{\#hash} method from the
+		\emph{Object} class.
+
+		% TODO	More general performance tuning tricks
+
+		To keep the overall object count and therefore also the Ruby garbage
+		collection overhead low, some objects such as \texttt{Strings}
+		containing \ac{HTTP} header names for example are instantiated as
+		frozen \texttt{String} constants at load time.
+
+		If the Rack environment key \texttt{rack.multithread} is set to true --
+		as we intend to do by default -- the middleware \texttt{Rack::Lock} no
+		longer ensures only one thread invoking \texttt{call} on the middleware
+		stack. Rack middleware classes writing to instance variables are not
+		necessarily thread-safe, because they are only instanciated once per
+		process. This is easily fixed by using the \emph{dup.\_call}
+		workaround. The original \texttt{call} method is renamed to
+		\texttt{\_call} and a new \texttt{call} method invokes \texttt{\_call}
+		only on previously duplicated instances of the middleware class. We
+		will use this method on any implemented Rack middleware.
+
+	\subsection{\acs{DTLS}}
+	\label{cha:design:server:dtls}
+
+		The component abstracting transmissions outlined in
+		\textref{cha:design:server:coap} has to be designed in such a way that
+		the socket class (\texttt{UDPSocket} or with \emph{Celluloid::IO}
+		\texttt{Celluloid::IO::UDPSocket} for unencrypted communication)
+		instantiated for communications can be configured. A \ac{DTLS}
+		implementation would have to provide an \ac{API} like the Ruby
+		\texttt{UDPSocket} class. By default, \texttt{Celluloid::IO::UDPSocket}
+		is used, because it is event-driven. To preserve this functionality, a
+		drop-in socket class replacement with \ac{DTLS} support would have to
+		be modeled after \texttt{Celluloid::IO::UDPSocket}. This way, a server
+		with a socket abstracting \ac{DTLS} encrypted packets can be started
+		instead of or concurrent to the server used for unencrypted messages.
+
+		Unlike with \ac{HTTP}, with \ac{CoAP} it is not unlikely an identity
+		derived from a device's public key or a certificate is used to
+		authenticate a peer (see section 9 of \cite{coap}). If the Rack
+		application is suitably implemented, it can adopt this identity
+		assuming that it is passed in through the Rack environment. A Rack
+		environment key such as \texttt{coap.dtls.id} could contain the
+		identity in \emph{RawPublicKey} mode or the certificate in
+		\emph{Certificate} mode. Also the Rack environment can provide a key
+		(for example \texttt{coap.dtls}) which can be used for the app to
+		determine the \ac{DTLS} encryption mode.
+
+		Transparent authentication based on \ac{DTLS} would require the
+		authentication relationship to be terminated at the server and
+		translated into a Rails authentication framework specific (e.g.\ 
+		warden\footnote{https://github.com/hassox/warden})
+		\texttt{Rack::Session} component. It would also require a mapping
+		between \ac{DTLS} identities or certificates and application specific
+		subjects which has to be provided by the application itself.
+
+\section{Protocol Translations}
+\label{cha:design:protocol}
+
+	To translate between CoAP and the \ac{HTTP} centric Rack interface, the
+	specifications for \emph{Cross-Protocol Proxying between \ac{CoAP} and
+	\ac{HTTP}} (see section 10 of \cite{coap}) and the \emph{Guidelines for
+	\ac{HTTP}-\ac{CoAP} Mapping Implementations} \cite{coap-mapping} can be
+	used. However, a \ac{CoAP}-\ac{HTTP} proxy in front of an ordinary
+	\ac{HTTP} \ac{Rails} application would not suffice the objectives of this
+	work as the framework shall support a \ac{CoAP} specific development and
+	therefore should be explicit about \ac{CoAP}. The Cross-Protocol Proxying
+	section states that \enquote{since \ac{HTTP} and \ac{CoAP} share the basic
+	set of request methods, performing a \ac{CoAP} request on an \ac{HTTP}
+	resource is not so different from performing it on a \ac{CoAP} resource}
+	(section 10.1 of \cite{coap}) and defines a few departures of behavior of
+	the methods GET, POST, PUT and DELETE that have to be implemented
+	accordingly. Section 7 of \cite{coap-mapping} defines a mapping of
+	\ac{CoAP} to \ac{HTTP} response codes (also see section 6 of
+	\cite{http-1}). That, however, can not be applied in this case, because
+	the framework's \ac{HTTP} response code has to be mapped to a \ac{CoAP}
+	response code. Tables \ref{table:mapping:codes:2xx} and
+	\ref{table:mapping:codes:4xx} define mappings in the opposite direction
+	(adopting entries from the \ac{CoAP} to \ac{HTTP} mapping table where
+	possible). As a fallback, \ac{HTTP} return codes not present in the mapping
+	table are translated via division by 100 (e.g.\ \ac{HTTP} \emph{404 Not
+	Found} maps to \ac{CoAP} \emph{4.04}). To enable explicit returns of
+	\ac{CoAP} response codes from Rack applications, \texttt{Float} values can
+	be used. In this case, the mapping has to be skipped.
+
+	\begin{table}[h!]
+		\begin{center}
+			\begin{tabular}{l|l}
+				\ac{HTTP}							& \ac{CoAP} \\
+				\hline
+				200 OK								& 2.05 Content \\
+				202 Accepted						& 2.01 Created \\
+				203 Non-Authoritative Information	& 2.05 Content \\
+				206 Partial Content					& \scriptsize{Not applicable} \\
+				207	Multi-Status					& \scriptsize{Not applicable} \\
+				208 Already Reported				& \scriptsize{Not applicable} \\
+				226 IM Used							& \scriptsize{Not applicable} \\
+			\end{tabular}
+		\end{center}
+		\caption{Mapping of \ac{HTTP} to \ac{CoAP} return codes (\emph{2xx Success})}
+		\label{table:mapping:codes:2xx}
+	\end{table}
+	
+	\emph{Informational} \ac{HTTP} response codes (as defined in section 6.2 of
+	\cite{http-1}) do not result in an immediate answer by the server and are
+	therefore not translated. As \ac{CoAP} supports no \emph{Redirect}
+	\ac{HTTP} response codes, another way has to be found to pass redirection
+	information to the client. It would be intransparent for the server to
+	follow the redirects and return the redirection target resource
+	representation to the client as if there was no redirection. The client
+	would have no way to determine if a resource is actually existent. To pass
+	the redirection information to the client, the server can translate the
+	Rack redirect answer into a \ac{JSON} document. An Example is given in
+	\autoref{lst:protocol:redirect}. If conditional requests (see section
+	5.10.8 of \cite{coap} and 3 of \cite{http-2}) are implemented, \ac{HTTP}
+	\emph{304 Not Modified} would be mapped to \ac{CoAP} \emph{2.03 Valid}. All
+	\emph{Server Error} response codes that are not translated directly via
+	division (505, 506, and 511) map to the generic \ac{CoAP} \emph{5.00
+	Internal Server Error}.
+
+	\begin{figure}[h!]
+		\begin{lstlisting}[gobble=6,caption={Exemplary \ac{JSON} redirect description},label=lst:protocol:redirect]
+			{
+				"code": 302,
+				"location": "/example"
+			}
+		\end{lstlisting}
+	\end{figure}
+	
+	To return \ac{CoAP} codes as accurate as possible, sometimes not only the
+	\ac{HTTP} return code but also the request method has to be considered. An
+	example for this case is the answer to a \ac{CoAP} DELETE request. Section
+	4.3.5 of \cite{http-1} states \enquote{the origin server SHOULD send a 202
+	(Accepted) status code if the action will likely succeed but has not yet
+	been enacted, a 204 (No Content) status code if the action has been enacted
+	and no further information is to be supplied, or a 200 (OK) status code if
+	the action has been enacted and the response message includes a
+	representation describing the status}. The \ac{CoAP} specification (see
+	5.8.4 of \cite{coap}) only demands a \ac{CoAP} \emph{2.02 Deleted} status
+	code independent of the success cases. So for a more correct
+	implementation, response codes have to be mapped from a tuple of \ac{HTTP}
+	method and response code to a \ac{CoAP} response code.
+
+	\begin{table}
+		\begin{center}
+			\begin{tabular}{l|l}
+				\ac{HTTP}							& \ac{CoAP} \\
+				\hline
+				402 Payment Required				& \scriptsize{Not applicable} \\
+				407 Proxy Authentication Required	& 4.01 Unauthorized \scriptsize{(Not really applicable)}\\
+				409 Conflict						& 4.12 Precondition Failed \\
+				410 Gone							& 4.04 Not Found \\
+				411 Length Required					& 4.02 Bad Option \\
+				414 URI Too Long					& 4.02 Bad Option \\
+				416 Range Not Satisfiable			& 4.02 Bad Option \scriptsize{(Not really applicable)}\\
+				417 Expectation Failed				& \scriptsize{Not applicable} \\
+				426 Upgrade Required				& \scriptsize{Not applicable} \\
+%				422 Unprocessable Entity			& \\
+%				423 Locked							& \\
+%				424 Failed Dependency				& \\
+%				428 Precondition Required			& \\
+%				429 Too Many Requests				& \\
+%				431 Request Header Fields Too Large	& \\
+%				451 Unavailable For Legal Reasons	& \\
+			\end{tabular}
+		\end{center}
+		\caption{Mapping of \ac{HTTP} to \ac{CoAP} return codes (\emph{4xx Client Error})}
+		\label{table:mapping:codes:4xx}
+	\end{table}
+
+	% Rails provides symbols for \ac{HTTP} return codes to make setting the
+	% return code for a response in the controller more
+	% readable\footnote{\urlRailsStatusCodes} (for example
+	% \texttt{:not\_found}).
+	
+	Where a direct translation is adequate, the basic mapping of headers will
+	be implemented as shown in \autoref{table:mapping:headers}. (This table
+	does not consider all existing HTTP headers, because of their huge number.)
+
+	\begin{table}
+		\begin{center}
+			\begin{tabular}{l|l}
+				\ac{CoAP} option								& \ac{HTTP} header \\
+				\hline
+				Accept											& Accept, Accept-Charset \\
+				Content-Format									& Content-Type \\
+				ETag \scriptsize{(Not necessarily reversible)}	& ETag \\
+				Proxy-Uri, Proxy-Scheme							& \scriptsize{Not applicable} \\
+				Max-Age											& Cache-Control: max-age \\
+				Location-Path, Location-Query					& Location \\
+				If-Match										& If-Match \\
+				If-None-Match									& If-None-Match \\
+				Size1											& \scriptsize{Not existing} \\
+				Size2 \scriptsize{(if block-wise or 4.13)}		& Content-Length \\
+			\end{tabular}
+		\end{center}
+		\caption{Direct mappings from \ac{CoAP} options to \ac{HTTP} headers}
+		\label{table:mapping:headers}
+	\end{table}
+
+	% TODO	Explain ETag translation
+
+	Some translations could be solved through Rack middleware (see
+	\autoref{cha:design:server:rack}). Except for the Resource Discovery,
+	translation through methods present directly in the server code is favored
+	over middleware usage. Using middleware for translating \ac{HTTP} to
+	\ac{CoAP} headers would change the Rack environment to contain \ac{CoAP}
+	headers. This would break transparency of that exemplary middleware and it
+	will not be possible to prepend it by another middleware expecting
+	\ac{HTTP} headers.
+
+	The following subsections describe the translation of more complex protocol
+	features.
+
+	\subsection{Block-wise Transfers}
+
+		The most naive implementation of handling requests for certain blocks
+		of a resource representation through block-wise transfers \cite{block}
+		would be requesting a full framework answer on each request and
+		returning only the requested chunk. However, if the resource
+		representation changes in between different requests with Block2 Option
+		in control usage (see section 2.3 of \cite{block}), the payload
+		possibly can not be reassembled on the client side.  According to
+		section 2.4 of \cite{block} a server should include an ETag option with
+		its responses. This way a client can try to obtain a fully consistent
+		resource representation again if the ETag value suddenly changes. It is
+		also possible to cache the resource representation initially received
+		from the framework in connection with the endpoint until the last chunk
+		is requested. If the server implements caching of framework responses
+		(and the application supports it by setting caching headers), the
+		performance can be increased, because the resource representation could
+		be cached for all endpoints.  Another approach would be using \ac{HTTP}
+		Range requests \cite{http-3} but that also would have to be supported
+		manually by the application\footnote{As of Rails 4.2: \texttt{curl -sI
+		http://localhost:3000 | grep Accept-Ranges}}. For now we intend to use
+		the naive implementation, because it does not require developing effort
+		on the Rack application side.
+
+	\subsection{Content Negotiation and Transcoding}
+	\label{cha:design:protocol:content}
+
+		For the Content Negotiation to be translated between both protocols
+		(see section 5.3 of \cite{http-1} for \ac{HTTP} and section 5.5.4 of
+		\cite{coap} for \ac{CoAP}), the accept option of a \ac{CoAP} request
+		has to be rewritten into a \ac{HTTP} media type and a content encoding,
+		which can be passed in to the Rack application through the
+		\texttt{HTTP\_ACCEPT} field in the environment. If possible, the
+		application responds with an appropriate body representation and the
+		correctly set \texttt{Content-Type} header. Section 6.2 of
+		\cite{coap-mapping} further specifies the media type mapping and
+		defines a \emph{Loose Media Type Mapping} that can be used to
+		generalize \ac{HTTP} media types to ones supported by \ac{CoAP}. In
+		section 6.3 also an algorithmic conversion from \ac{HTTP} Internet
+		Media Type to \ac{CoAP} Content Format is given.
+
+		For constrained nodes, a compact payload serialization format such as
+		\ac{CBOR} \cite{cbor} is essential. It is possible to transcode between
+		payload content formats to make use of efficient formats (as mentioned
+		in section 6.4 of \cite{coap-mapping}). \ac{JSON} can be mapped
+		transparently to \ac{CBOR}. This is particularly useful, because
+		\ac{JSON} is easily generated out of a \ac{Rails} 4 application by
+		direct conversion of an object (with the \texttt{to\_json} instance
+		method) from the controller or a \texttt{jbuilder} template as view
+		specification. To support formats that can not directly be converted to
+		\ac{JSON}, conversion methods and possibly a \ac{DSL} for easier
+		templating would be needed, therefore this work currently focuses
+		solely on \ac{CBOR}.
+
+		The cbor gem \cite{cbor-gem} is a ready-to-use library \enquote{based
+		on the (polished) high-performance msgpack-ruby code} for serialization
+		of Ruby objects into \ac{CBOR} and vice versa. Although the gem
+		currently does not support JRuby as a Ruby \ac{VM}, we favor it over
+		cbor-simple\footnote{\urlCborSimple}, because of its performance.
+
+		Transcoding of incoming requests with \ac{CBOR} payloads to \ac{JSON}
+		is less straightforward. Other than \ac{JSON}, \ac{CBOR} does not only
+		support Strings as keys in Hashes. When converting a Hash to \ac{JSON},
+		the standard library \texttt{JSON.parse} method calls \texttt{\#to\_s}
+		on the keys. An exemplary Hash \texttt{\{1 => 2\}} decoded from
+		\ac{CBOR} would become the \ac{JSON} String \texttt{'\{"1" => 2\}'}. So
+		if we actually want to pass the information that the key \texttt{1} is
+		a Fixnum correctly into the controller, we can not use \ac{JSON}. A
+		method would have to be found how to convert incoming \ac{CBOR} payload
+		directly into the Rails \texttt{params} Hash as it is done with
+		incoming \ac{JSON} data by Rails. A less elegant way would be letting
+		the application programmer parse the \ac{CBOR} body in the controller.
+		Handing down a Ruby object deserialized from \ac{CBOR} in the Rack
+		environment (for example as value of \texttt{coap.cbor}) would provide
+		a little convenience and prevent redundant parsing.
+
+		When automatically translating \ac{JSON} bodies to \ac{CBOR}, protocol
+		compatibility and transparency have to be preserved. If the client does
+		not specify a content format preference through the accept option, a
+		\ac{JSON} response of the Rack application can be translated
+		transparently into \ac{CBOR}. The same applies if the client specifies
+		\ac{CBOR} as its preferred content format. If the client actually
+		requests the body represented in a certain content format different
+		from \ac{CBOR} (e.g.\ \ac{JSON}), the answer must also be in that
+		content format to not break with Content Negotiation as required by
+		\ac{CoAP} or \ac{HTTP}.
+
+		Transcoding could be implemented as a Rack middleware that is also a
+		\emph{Celluloid} actor. A message containing information about which
+		Media Types for which controller action are to be transcoded could be
+		sent from the Rails controller to the \texttt{Transcoding} middleware
+		actor. This would enable the application developer to decide for which
+		controller and actions a configurable transcoding happens. However,
+		currently we know of no way to determine the controller and action in a
+		middleware \texttt{call}. Without this information, a transcoding
+		middleware has no advantages over transcoding the body representation
+		outside of the Rack middleware stack.
+
+	\subsection{Chunked Transfer Coding}
+
+		Since version 1.5.0, Rack supports \ac{HTTP}/1.1 Chunked Transfer
+		Coding (see section 4.1 of \cite{http-0}). In a plain Rack application
+		as seen in \textref{lst:rack:basic} for example, the response body is
+		chunked transparently if the \emph{Content-Length} header is omitted.
+		There is not really a \ac{CoAP} extension which is comparable, although
+		with \cite{coap-streaming} there is an expired draft. This, however,
+		needs the client to explicitly send an observe register (see sections
+		2.1 of \cite{coap-streaming} and 3.1 of \cite{observe}). The server has
+		to reassemble the chunked resource representation, possibly cache it
+		and return it to the client.
+
+	\subsection{Resource Discovery}
+
+		The \ac{CoAP} Resource Discovery (section 7 of \cite{coap}) is
+		especially useful in \ac{M2M} communication. After nodes are discovered
+		through Service Discovery (see section 7.1), the
+		\texttt{.well-known/core} interface according to \cite{link} (as
+		referenced by section 7.2) can be used to discover a node's resources
+		and their attributes such as the content format or an interface
+		description. An automatic listing of a rack applications resources is
+		examined in the next subsection. The Multicast subsection describes the
+		requirements of multicast enabled resource discovery. The design of a
+		\acf{RD} \cite{rd}, which maintains \ac{CoRE} Link collections of
+		different nodes, is considered in the \acl{RD} subsection.
+
+		\subsubsection{Reflection of Routing in .well-known/core}
+		\label{cha:design:protocol:link}
+
+			The \texttt{.well-known/core} resource returning a description of
+			the available resources of the Rack application in the \ac{CoRE}
+			Link Format \cite{link} can be provided by the \ac{CoAP} server as
+			a Rack middleware. By including the server into a \ac{Rails}
+			project, a middleware can be inserted into the stack automatically
+			utilizing a Railtie \cite{railtie}. There is no general way to list
+			the resources provided by a Rack application or an application
+			written in any Rack based web framework. Using \ac{Rails}, an
+			enumeration of the defined routes is possible by processing
+			\texttt{Rails.application.routes}. To support different Rack based
+			web frameworks, it is necessary to create framework specific
+			modules for the enumeration of resources.
+
+			The only attribute of a Link that can be determined by just
+			enumerating the routes is \texttt{href}. A method of annotating
+			resources with information about Resource Type (rt), Interface
+			Description (if), Maximum Size Estimate (sz), and the other
+			possible attributes for CoRE Link descriptions has to be developed.
+			One possibility would be providing a method in the context of a
+			controller defining both default attributes and attributes for
+			specific resources. \autoref{lst:discovery:annotation} provides an
+			example of how this could be used. On call of the
+			\texttt{discoverable} method, these attributes have to be
+			communicated to the instance of the Resource Discovery Rack
+			middleware, which is instantiated at the start of the server.
+			Besides dynamically changing a method of the middleware instance to
+			return the right structure containing any defined link attributes,
+			the middleware instance could also be a \emph{Celluloid} actor that
+			can receive messages triggered by the call of \texttt{discoverable}
+			in the controller context. An overview in the form of a sequence
+			diagram is to be seen in \autoref{img:discovery:annotation}.
+			Possible performance impacts of \emph{Celluloid} actor inclusion in
+			the middleware stack have to be analyzed.
+
+			\ac{Rails} returns the available resources as \ac{URI} patterns.
+			Those patterns are known for example from the output of the command
+			\texttt{rake routes} ran in a \ac{Rails} project. An \ac{URI}
+			pattern like \texttt{/things/:id} could be machine processable, if
+			all involved endpoints support \texttt{:id} is a variable
+			substitution. But this pattern follows no known standard. The
+			\ac{URI} Template standard \cite{uri-template} defines ways of
+			variable expansions for \acp{URI}. By this definition, the
+			previously mentioned pattern could be represented by the template
+			\texttt{/things/\{id\}}. This substitution can easily be performed
+			by the middleware. However, \ac{URI} Templates are not supported in
+			\ac{CoRE} Link \ac{URI}-references.
+ 
+			Actors included in the middleware stack should be supervised and
+			therefore restarted on crash, because otherwise any request fails
+			after one actor in the stack died due to the impossibility of
+			invoking the \texttt{call} method on a dead actor. This is not
+			trivial, because the \emph{Celluloid} \ac{API} only provides a
+			supervision possibility if the actor is instantiated in a special
+			way but Rack expects to instanciate middleware objects itself.
+			Probably this can be solved through a proxy object.
+
+			% TODO	Analyze actor middleware performance somewhere.
+			
+			\begin{figure}
+				\begin{lstlisting}[gobble=8,caption={Action annotation for Resource Discovery},label={lst:discovery:annotation}]
+					class ThingsController < ApplicationController
+						discoverable \
+							default: { if: 'urn:things', ct: 'application/cbor' },
+							index:   { if: 'urn:index' }
+
+						def show
+							render json: Thing.find(params[:id])
+						end
+
+						def index
+							render json: Thing.all
+						end
+					end
+				\end{lstlisting}
+			\end{figure}
+
+			\begin{figure}
+				\begin{center}
+					% {\scalefont{0.75}
+						\begin{sequencediagram}
+							\newinst   {c}{Client}
+							\newinst[2]{s}{\emph{Server} actor}
+							\newinst   {d}{\emph{Discovery} actor}
+							\newinst[1]{a}{Controller contexts}
+
+							\mess{a}{Link attributes}{d}
+
+							\begin{messcall}{c}{GET /.well-known/core}{s}
+								\begin{call}{s}{call}{d}{}
+								\end{call}
+
+								\mess{s}{2.05}{c}
+							\end{messcall}
+						\end{sequencediagram}
+					% }
+				\end{center}
+				\caption[Interaction regarding action annotation for Resource
+					Discovery]{Interaction regarding action annotation for
+					Resource Discovery. The \emph{Discovery} actor receives
+					link attributes of resources from the respective
+					controller. The resource descriptions returned on client
+					request then contain these attributes.}
+				\label{img:discovery:annotation}
+			\end{figure}
+
+		\subsubsection{Multicast}
+		\label{cha:design:protocol:multicast}
+
+			The \texttt{.well-known/core} resource has to be offered
+			additionally on multicast requests to the addresses defined in
+			sections 8 and 12.8 of \cite{coap} and section 2.2 of
+			\cite{coap-group}. The implementation guidance document draft
+			\cite{coap-guide} does not state anything regarding the
+			implementation of multicast Resource Discovery. To limit the size
+			and number of answers, it is beneficial to support filtering the
+			result set by the entries attributes. If the result set is empty,
+			no response should be sent on multicast requests (as it is
+			described by section 8.2 of \cite{coap} and section 4.1 of
+			\cite{link}. Through a \ac{CoAP} specific Rack environment entry
+			(\texttt{coap.multicast}), it would be possible for applications to
+			determine if an incoming request was received on a multicast
+			address.
+
+			% TODO	It has to be evaluated..!
+
+			It has to be evaluated how the synchronous nature of \ac{HTTP} and
+			therefore Rack and \ac{Rails} can be integrated for example with
+			the leisure period requirement mentioned in section 8.2 of
+			\cite{coap}.
+
+		\subsubsection{\acf{RD}}
+		\label{cha:design:protocol:rd}
+
+			A \acl{RD} \cite{rd} \enquote{hosts descriptions of resources held
+			on other servers, allowing lookups to be performed for those
+			resources}. The specification can be implemented as a \ac{Rails}
+			application or mountable engine \cite{rails-engine}. The provision
+			of the \texttt{.well-known/core} resource from a Rack middleware
+			(as specified earlier in this section) will not be used in this
+			case, because it is integrated with the routing and controllers of
+			the \ac{Rails} application. As the default content format is
+			\texttt{application/link-format}, we need a way to make it
+			configurable for the application.
+
+	\subsection{Observe}
+	\label{cha:design:protocol:observe}
+
+		The \ac{CGI} inspired design of Rack aimed at synchronous
+		communications complicates the integration of asynchronous concepts
+		like \emph{WebSocket} or -- in our case -- \ac{CoAP} observe
+		\cite{observe}. \emph{Rack Hijack} \cite{rack} describes the proceeding
+		of handing over the socket object from the server to the application
+		(controllers) as a Rack environment option. For \emph{WebSockets},
+		there is a gem called \emph{tubesock}\footnote{\urlTubesock} utilizing
+		\emph{Rack Hijack}, which could be used as an inspiration for a gem
+		that provides support for \emph{Observe} in \ac{Rails} in a similar
+		manner. However, this is rather bad design, because placing the observe
+		logic out of the server and into an extra gem used from the framework
+		facilitates code duplication and breaks the model of a layered stack of
+		abstractions from a object-oriented design point of view. In
+		\emph{tubesock}, this may even be a valid design choice, because the
+		\emph{WebSocket} protocol \cite{websocket} is out-of-band and not
+		handled by the main web server. The code to be executed is handed over
+		to \emph{tubesock} by callbacks, which conflicts with the declarative,
+		object-oriented design philosophy of \emph{Celluloid}. This method also
+		circumvents the Rack middleware stack.
+
+		Another approach would be viewing a component handling observe
+		notifications and observer management as an actor (realized with
+		\emph{Celluloid}). On incoming observe register or deregister requests,
+		the server actor(s) message the observe actor. The observe actor
+		maintains the list of registered observers and periodically determines
+		whether to send observe notifications (further called \emph{Observe
+		tick}). The interaction of actors among each other and with the client
+		and the Rack application in the cases register, deregister and tick are
+		visualized in \autoref{img:server:actor:interaction}. The most quick
+		and easy implementation for determining whether an update is necessary,
+		is to clone the original request of a resource, pass it to the
+		framework (Rack application) and send a notification if the resource
+		changed. With the framework answer's validator header fields
+		\texttt{Last-Modified} and \texttt{ETag} (see sections 2.2 and 2.3 of
+		\cite{http-2}) (or, if they are missing, a hash sum of the body) it can
+		be determined if the framework returned a changed body and thus a
+		client has to be notified about the updated resource. An optimization
+		for frameworks supporting validator header fields is to facilitate
+		conditional requests. This way it is possible, the overhead of
+		regenerating the resource representation can be stinted. For an
+		exemplary interaction in this case, refer to
+		\autoref{img:observe:cache}. \ac{Rails} uses \emph{Rack::ETag} for
+		entity tags which is a middleware that can also be used to provide
+		plain Rack applications or other Rack based frameworks with
+		\texttt{ETag} support. In \ac{Rails}, the decision whether the resource
+		representation has to be rendered is made from controller code and
+		thereby explicitly necessary. The notification can be omitted if the
+		entity tag did not change and the max-age time of the last notification
+		is not expired. If this max-age time is expired and the entity tag did
+		not change, a notification with \ac{CoAP} \emph{2.03 Valid} response
+		code is sent.
+		
+		For the observer list management, besides adding observers to resources
+		and deleting them, the observe actor has to implement a
+		\enquote{garbage collection} for obsolete observe relationships (as
+		described in section 3.6 of \cite{observe}). If observe notifications
+		are always sent as non-confirmable messages and the server does not
+		send any other confirmable messages, the retransmission logic can be
+		omitted. This saves some memory and \ac{CPU} resources. The
+		specification explicitly states, \enquote{A notification can be
+		confirmable or non-confirmable, i.e., it can be sent in a confirmable
+		or a non-confirmable message. The message type used for a notification
+		is independent of the type used for the request and of any previous
+		notification.} (see section 3.5 of \cite{observe}).
+
+		\begin{figure}
+			\begin{center}
+				% {\scalefont{0.75}
+					\begin{sequencediagram}
+						\newinst   {c}{Client}
+						\newinst[2]{s}{\emph{Server} actor}
+						\newinst   {o}{\emph{Observe} actor}
+						\newinst[1]{a}{Rack application}
+
+						\begin{sdblock}{\emph{Observe register}}{}
+							\begin{messcall}{c}{GET /example, observe: 0}{s}
+								\begin{call}{s}{call}{a}{200, "Foo", ETag: 0x91}
+									\postlevel
+								\end{call}
+
+								\mess{s}{add}{o}
+
+								\mess{s}{2.05, "Foo", observe: 1, etag: 0x91}{c}
+							\end{messcall}
+						\end{sdblock}
+
+						\begin{sdblock}{\emph{Observe tick}}{}
+							\begin{messcall}{o}{respond}{s}
+								\begin{call}{s}{call(If-None-Match: 0x91)}{a}{304 Not Modified}
+								\end{call}
+							\end{messcall}
+
+							\begin{messcall}{o}{respond}{s}
+								\begin{call}{s}{call(If-None-Match: 0x91)}{a}{200, "Bar", ETag: 0x63}
+									\postlevel
+								\end{call}
+							\end{messcall}
+
+							\mess{o}{2.05, "Bar", observe: 2, etag: 0x63}{c}
+						\end{sdblock}
+					\end{sequencediagram}
+				% }
+			\end{center}
+			\caption[Observe interaction with conditional requests]{Observe
+				interaction with conditional requests. On \emph{Observe
+				register} the \texttt{ETag} value of the Rack response is saved
+				and later used to determine if the resource representation
+				changed and an update is necessary.}
+			\label{img:observe:cache}
+		\end{figure}
+
+		For the application code it would be possible to utilize the HTTP/1.1
+		caching headers like \texttt{Expires} or \texttt{Cache-Control max-age}
+		(see sections 5.3 and 5.2 of \cite{http-4}) to communicate when a
+		resource should be polled again and in which interval a resource change
+		should be polled for. Polling for resource updates wastes resources, so
+		for a more performant solution, the framework or application code would
+		have to message the observe actor about a resource update. If the
+		resource is a representation of a list of saved entities for example,
+		the framework would have to notify the observe actor on each creation
+		or deletion of an entity. However, this problem can not generally be
+		solved by callbacks triggered on database changes. Explicitly
+		signalling a resource update with a certain method call from the
+		\ac{Rails} controller is not possible, since the controller code is
+		only called upon request from the server or observe actors and not
+		running as an actor itself.
+
+		In \autoref{lst:observe:example} a \ac{Rails} controller code
+		example is shown that both manipulates the polling frequency of the
+		observe actor for this resource and only renders the resource
+		representation if a conditional request by the observe actor indicates
+		a change. \emph{\ac{Rails}::Observers}\footnote{\urlRailsObservers} can
+		be used to further control cache invalidation.
+
+		% TODO	Examine Rails Observers
+		% 		https://github.com/rails/rails-observers
+
+		\begin{figure}
+			\begin{lstlisting}[gobble=8,caption={Caching options in \ac{Rails} controller},label={lst:observe:example}]
+				class ThingsController < ApplicationController
+					def show
+						@thing = Thing.find(params[:id])
+
+						# Set Cache-Control max-age to 60 seconds.
+						# Manipulates observe actor polling frequency.
+						expires_in 1.minutes
+
+						# Set Last-Modified and ETag headers
+						# and respond only if conditional request matches.
+						render json: @thing if stale? @thing
+					end
+				end
+			\end{lstlisting}
+		\end{figure}
+
+% \section{Conclusion}
+
+% We tried to exhaustively design most aspects of the software system but
+% obviously there are limits to the level of detail possible in the context of
+% this work. Further features can iteratively be added to the software, because
+% of its modularity.

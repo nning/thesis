@@ -1,0 +1,129 @@
+\chapter{Related Work}
+\label{cha:related-work}
+
+In this chapter we examine which solutions exist that partly answer our
+research questions and give an introduction to possible sources in that
+contexts.
+
+\section{Frameworks}
+
+	Generally, \ac{CoAP} server implementations provide their own \ac{API} for
+	applications in constrained environments to be crafted and do not support
+	common frameworks (see a Hello World server application for
+	\emph{Californium}\footnote{\urlCaliforniumHelloWorld} and a exemplary
+	server with several resources based on
+	\emph{libcoap}\footnote{\urlLibcoapExample}, for example). Those \acp{API}
+	can also be seen as the framework in which applications are developed in.
+	Examples are \emph{Californium} \cite{californium}, \emph{Erbium}
+	\cite{erbium} and \emph{libcoap} \cite{libcoap}. For applications on
+	constrained nodes the absence of full-featured frameworks is not
+	remarkable, because \ac{CPU} and memory resources are quite limited. For a
+	definition of the constraints see \cite{terminology}. Applications which do
+	not have to be especially optimized on limited resources can profit from
+	framework utilization.
+	
+	At the time of writing, we could only find one integration of a \ac{CoAP}
+	server with a common web framework. \emph{Web\acs{IoT}} \cite{webiot} can
+	be seen as a framework for constrained applications. It supports different
+	protocols and is based on the \ac{GWT}. However, as it is focusing on
+	graphical applications it ships with a mandatory \ac{HTTP} web interface
+	and allows application development only as plugins. It is also not
+	optimized for the features of a specific protocol but tries to aggregate
+	sensor data protocol independently.
+
+	In the context of Ruby, Rack is the most widely adopted interface between
+	web servers and applications and it is supported by many web application
+	frameworks (see \autoref{table:background:rack}). The Rack specification
+	\cite{rack} lists the Python Web Server Gateway Interface \cite{pep333} as
+	a source of inspiration. Rack is chosen for this work because of its spread
+	and provision of a solid base.
+
+	There are many \ac{HTTP} web servers written in Ruby that support the Rack
+	interface. Although they are probably designed in a substantially different
+	way than \ac{CoAP} servers, they can be analyzed regarding to their Rack
+	implementation and used for comparison in the performance evaluation of our
+	work. Notable examples are \emph{Reel}, \emph{Thin}, and \emph{Unicorn}
+	(see \cite{reel}, \cite{thin}, and \cite{unicorn}).
+
+\section{Scalability}
+
+	The inability of web servers with concurrent request handling based on
+	processes or threads to scale up to 100.000 requests per second led to the
+	framing of \emph{The C10K problem} \cite{c10k}. One possibility to solve
+	this problem is event-driven architecture as it is discussed in the Reactor
+	pattern \cite{reactor-1} \cite{reactor-2} designed by Douglas C. Schmidt
+	and others. Matthias Kovatsch provides a detailed overview of web server
+	architectures with regard to scalability in his dissertation thesis
+	\citetitle{scalable-iot} \cite{scalable-iot}.
+
+	For Ruby there are a number of libraries targeting the simplification of
+	the development of concurrent programs. For this work especially
+	\emph{Celluloid} \cite{celluloid} is considered. The basics of concurrency
+	and \emph{Celluloid} are also highlighted in
+	\autoref{cha:background:concurrency}.
+
+	Especially \emph{Californium} is promising as a source of inspiration for
+	performance and concurrency oriented design. According to a paper among
+	others written by its original author Matthias Kovatsch, \emph{Californium}
+	handles almost 400,000 requests per second \cite{cf-scale}. Some
+	observations from the \emph{Celluloid} source code are collected in
+	\autoref{cha:background:coap:concurrency}.
+
+\section{\acs{CoAP}}
+
+	Current and comprehensive lists of \ac{CoAP} implementations are to be
+	found in the Wikipedia \cite{coap-list-1} and on the website
+	\href{http://coap.technology}{coap.technology} \cite{coap-list-2}.
+	Especially implementations in C/C++, Java or -- of course -- Ruby with a
+	server component are qualified for a Ruby integration and therefore
+	suitable to be based upon in the context of this work. To which extent the
+	adaption of an already existing library is beneficial and the corresponding
+	design questions are discussed in \autoref{cha:background:coap} and
+	\autoref{cha:design:server:coap}.
+
+	Independent of their qualification for a Ruby integration, some
+	implementations can give valuable input regarding to the architecture and
+	design of the basic protocol features such as deduplication (see section
+	4.5 of \cite{coap}) or extensions such as block-wise transfers \cite{block}
+	or observe \cite{observe}. Although this work focuses on the server side,
+	also client implementations are interesting for their way of message
+	parsing, usage in testing of our server implementation and their
+	transmission layer with regards to code reuse. However, analyzing every
+	implementation in detail would not be possible because of the time
+	constraints of this thesis.
+
+	Both the \emph{Cross-Protocol Proxying between CoAP and HTTP} section of
+	\cite{coap} (see section 10) and the \emph{Guidelines for
+	\ac{HTTP}-\ac{CoAP} Mapping Implementations} \cite{coap-mapping} can be
+	consulted regarding to translations of \ac{CoAP} headers and protocol
+	features to \ac{HTTP} and vice versa. However, simply proxying an ordinary
+	Rails application would not suffice. An objective for our solution is that
+	it supports a \ac{CoAP} specific development and therefore should be
+	explicit about that protocol. The mapping guidelines also make some general
+	statements about the transparent conversion of one content format into
+	another, called \emph{Transcoding} (see section 6.4 of
+	\cite{coap-mapping}).
+
+	We did not find any Open Source client or server implementations supporting
+	the \ac{RD} draft \cite{rd}. The only exception is a server implementation
+	contained as an example in the \emph{txThings}\footnote{\urlTxThings}
+	project. However, it implements an older version of the draft and is
+	missing functionality. The \ac{CoAP} article in the Wikipedia
+	\cite{coap-list-1} lists \emph{CoAPSharp} as supporting the \ac{RD} draft
+	but its code contains no indications about that.
+
+\section{\acs{DTLS}}
+
+	\ac{CoAP} depends on \ac{DTLS} for security (see section 9 of \cite{coap}).
+	The \acs{DICE} \ac{WG} of the \ac{IETF} works on supporting the use of
+	\ac{DTLS} in constrained environments. The main draft that is currently
+	worked on defines a profile of \ac{DTLS} 1.2 \cite{dtls} (and \ac{TLS} 1.2
+	\cite{tls}) \enquote{that offers communication security for \ac{IoT}
+	applications} \cite{dtls-profile}. Another draft aims to standardize the
+	\ac{DTLS} handshake on top of \ac{CoAP} to make use of block-wise transfers
+	\cite{codtls}. There is a Ruby
+	library\footnote{\url{https://rubygems.org/gems/codtls}} that implements
+	this draft in an alpha state. An early draft \cite{dtls-multicast}
+	considers securing multicast communications in that context. The
+	integration of \ac{DTLS} into \emph{Californium} is discussed in a master's
+	thesis from 2012 \cite{californium-dtls}.

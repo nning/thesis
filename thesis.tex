@@ -1,0 +1,59 @@
+\documentclass[12pt,a4paper]{thesis}
+
+\begin{document}
+
+	\title{A \acs{CoAP} Server with a Rack Interface for Use of Web Frameworks
+		such as \acl{Rails} in the \acl{IoT}}
+	\subtitle{Diploma Thesis}
+	\author{\href{mailto:mail@nning.io}{Henning Müller}}
+	\date{}
+	\publishers{
+		\small
+
+		Matriculation No. 2198830\\
+		\today
+		\vspace{2cm}
+
+		\begin{tabular}{rl}
+			Supervisor 	& \href{mailto:cabo@tzi.org}{Prof. Dr.-Ing. Carsten Bormann}\\
+			Reviewer 	& \href{mailto:bergmann@tzi.org}{Dr.-Ing. Olaf Bergmann}\\
+			Adviser		& \href{mailto:fjunge@tzi.org}{Dipl.-Inf. Florian Junge}
+		\end{tabular}
+
+		\vspace{1cm}
+		Faculty 3: Computer Science and Mathematics
+
+		\vspace{.25cm}
+		\IfFileExists{.no_color}{
+			\includegraphics{images/uni-bremen.pdf}
+		}{
+			\includegraphics{images/uni-bremen-color.pdf}
+		}
+	}
+
+	\newgeometry{margin=1in}
+	\maketitle
+	\restoregeometry
+
+	\include{chapters/copyleft}
+
+	\frontmatter
+
+	\include{chapters/abstract}
+
+	\tableofcontents
+
+	\mainmatter
+
+	\include{chapters/introduction}
+	\include{chapters/related-work}
+	\include{chapters/background}
+	\include{chapters/objectives}
+	\include{chapters/design}
+	\include{chapters/implementation}
+	\include{chapters/evaluation}
+	\include{chapters/conclusion}
+
+	\include{appendix}
+
+\end{document}

@@ -1,0 +1,401 @@
+\chapter{Background}
+\label{cha:background}
+
+For the design of different aspects of the software created during this work,
+some background on the server's concurrency architecture, the Rack interface,
+and the \ac{CoAP} implementation will be given in this chapter. We will weigh
+the advantages and disadvantages of different concurrency models in
+\autoref{cha:background:concurrency}. The Rack interface is introduced in
+\autoref{cha:background:rack}. For the \ac{CoAP} implementation, we analyze
+different existing projects to learn about implementation techniques in
+\autoref{cha:background:coap}. Some background will be given about the Observe
+extension \cite{observe} and the \ac{CBOR} \cite{cbor}.
+
+\section{Concurrency and Celluloid}
+\label{cha:background:concurrency}
+
+	% TODO	Explain non-blocking
+	% TODO	Celluloid concurrent data structures?
+
+	Classicly the concurrent handling of network messages is based on
+	processes, threads, or a combination of these. Both have some performance
+	drawbacks through overhead regarding process state and context switching.
+	In general, the overhead of threads is a little lower than with processes.
+	
+	Using threads in Ruby (\ac{MRI}) even has some extra performance issues:
+	Although Ruby threads are mapped to \ac{OS} level threads, a \ac{GIL}
+	prevents scaling to more than one \ac{CPU} per process and therefore
+	also prohibits maximum concurrency. Threads also provide some
+	implementation challenges such as avoiding deadlocks. Process-based
+	concurrency tends to an even higher memory consumption, if there is a
+	necessity to share state between processes. Kovatsch and Erb give a
+	detailed overview of web server architectures and their advantages and
+	disadvantages for scalability and performance in the publications
+	\citetitle{scalable-iot} \cite{scalable-iot} (section 4.1.2) and
+	\citetitle{scalable-web} \cite{scalable-web}, respectively.
+
+	Event-driven architecture attempts to reduce the overhead caused through
+	process or thread based concurrent handling of network messages. The
+	Reactor pattern \cite{reactor-1} \cite{reactor-2} provides a pattern for
+	implementation of event-driven architecture. Popular examples of Reactor
+	pattern implementations in the Ruby ecosystem are \emph{eventmachine} and
+	\emph{Celluloid::IO}. \emph{Celluloid::IO} provides drop-in replacements
+	for the socket classes from the Ruby standard library that use the reactor
+	pattern on strictly non-blocking receive methods. It is built on top of
+	\emph{Celluloid} -- a library that provides an \enquote{actor-based
+	concurrent object framework} \cite{celluloid}. So \emph{Celluloid} does not
+	only provide a library for evented I/O but also a framework based on
+	threads for object concurrency in general. \emph{Celluloid} uses fibers for
+	asynchronous message calls between threads. Fibers are supported since Ruby
+	1.9 as a manually scheduled means of concurrency that needs less memory and
+	context changes than threads. The \emph{Celluloid} README
+	\cite{celluloid-readme} states that \enquote{Each actor is a concurrent
+	object running in its own thread, and every method invocation is wrapped in
+	a fiber that can be suspended whenever it calls out to other actors, and
+	resumed when the response is available.} Celluloid is modeled after the
+	ACTOR Formalism defined by Hewitt et al.\ in 1973. Actors integrate well
+	with clean, synchronous object oriented design, because no callbacks are
+	used for asynchronous operations. They can be supervised and automatically
+	be restarted on crashes through unhandled exceptions for example. Linking
+	one actor to another ensures the former also crashes or being notified when
+	the latter fails. \emph{eventmachine} only provides evented I/O and
+	therefore object concurrency (application threads, messaging, etc.) would
+	have to be approached manually when it is used. Another argument against
+	\emph{eventmachine} is its flawed \acs{IPv6} support \footnote{\urlEMSix}.
+
+	The server process to be implemented can consist of several concurrent
+	actors for different tasks such as handling new requests or managing
+	notifications to clients observing resources. The actors handling incoming
+	packages can utilize reactors provided by \emph{Celluloid::IO}
+	\cite{celluloid-io} to handle concurrent network communications. 
+
+\section{Rack}
+\label{cha:background:rack}
+
+	% TODO	One contextual sentence..?
+
+	The basic ideas of Rack are as follows. An application is a Ruby object
+	that responds to a method named \texttt{call}. This method is invoked for
+	example by a server when an application response is demanded. The only
+	argument an invocation of \texttt{call} includes is a
+	\texttt{Hash}\footnote{\urlRubyHash} representing the environment of the
+	request. This includes information such as the \ac{HTTP} method (see
+	section 4 of \cite{http-1}), the path, query string and \ac{HTTP}
+	headers (see section 5 of \cite{http-1}) of the request. The Rack
+	environment was inspired by the \ac{CGI}, an interface for web servers to
+	retrieve \ac{HTTP} responses from external programs. It is also extended
+	by Rack specific options such as the Rack interface version. An invocation
+	of \texttt{call} has to return an \texttt{Array}\footnote{\urlRubyArray}
+	containing the \ac{HTTP} status code (see section 6 of \cite{http-1}), a
+	\texttt{Hash} of \ac{HTTP} headers, and the response payload\footnote{Which
+	has to respond to \texttt{each}, take a block and yield chunked data as
+	\texttt{Strings}}. An example for a particularly minimal Rack application
+	would be the Ruby code shown in \autoref{lst:rack:basic}; normally headers
+	such as \emph{Content-Type} and \emph{Content-Length} would be included
+	with their respective values.
+
+	\begin{figure}[H]
+		\begin{lstlisting}[gobble=6,caption={Minimal Rack application},label=lst:rack:basic]
+			# A Proc object getting env as argument returning an Array.
+			->(env) { [200, {}, ['Hello World']] }
+		\end{lstlisting}
+	\end{figure}
+
+	Rack offers the possibility to wrap the invocation of the \texttt{call}
+	method of an application through an intermediary called \emph{middleware}.
+	A piece of middleware basically works like an application, also providing a
+	\texttt{call} method with the environment as argument. The Rack application
+	is passed upon initialization of the middleware class. On \texttt{call}
+	invocations, the middleware is able to change the environment or the
+	application response according to its function. As an example, an
+	authentication mechanism would be possible to implement as a Rack
+	middleware that returns a forbidden status code unless the request
+	environment contains valid credentials in the query string. A popular Rack
+	middleware example included in \ac{Rails} by default and also interesting
+	in the context of this work is \emph{Rack::ETag} which adds entity tag
+	headers to responses (see section 2.3 of \cite{http-2}). Rack middleware is
+	usually independent from the framework or application, so it can be used
+	with different frameworks supporting Rack.
+
+	Instance variable access in Rack middleware can lead to concurrency
+	problems when conducted in a multi-threaded system, because every
+	middleware class is only instantiated once\footnote{\urlRackDupCall}. See
+	\autoref{lst:rack:dupcall} for a possible but rather expensive workaround.
+
+	\begin{figure}[H]
+		\begin{lstlisting}[gobble=6,caption={Rack dup.\_call workaround},label=lst:rack:dupcall]
+			class Middleware
+				def call(env)
+					dup._call(env)  # Duplicate instance and invoke _call.
+				end
+
+				def _call(env)      # Actual middleware logic.
+					@env = env      # Safe now!
+					...
+				end
+			end
+		\end{lstlisting}
+	\end{figure}
+
+	There are numerous different Rack frameworks, some of them with very
+	distinctive features. We compiled a list of frameworks and their download
+	locations in \autoref{table:background:rack} for an overview. We will refer
+	to some of them later in other contexts.
+
+	\begin{table}[H]
+		\begin{center}
+			\begin{tabular}{l|l}
+				Framework			& Website \\
+				\hline
+				Grape				& \url{http://intridea.github.io/grape} \\
+				Camping				& \url{http://camping.io} \\
+				Cramp				& \url{https://cramp.in} \\
+				Cuba				& \url{https://cuba.is} \\
+				Brooklyn			& \url{https://github.com/luislavena/brooklyn} \\
+				Hobbit				& \url{https://github.com/patriciomacadden/hobbit} \\
+				Nancy				& \url{http://guilleiguaran.github.io/nancy} \\
+				NYNY				& \url{http://alisnic.github.io/nyny} \\
+				Ramaze				& \url{http://ramaze.net} \\
+				\acs{REST}Rack		& \url{http://restrack.me} \\
+				Roda				& \url{http://roda.jeremyevans.net} \\
+				Scorched			& \url{http://scorchedrb.com} \\
+				Sinatra				& \url{http://www.sinatrarb.com} \\
+				\acs{Rails}::API	& \url{https://github.com/rails-api/rails-api} \\
+				\acl{Rails}			& \url{http://rubyonrails.org} \\
+			\end{tabular}
+		\end{center}
+		\caption{Rack frameworks}
+		\label{table:background:rack}
+	\end{table}
+
+	As the Rack interface is designed for \ac{HTTP} requests and responses,
+	some adaption has to be performed when using it with \ac{CoAP}. On
+	requests, \ac{CoAP} options have to be translated to \ac{HTTP} headers to
+	be included in the Rack environment. For responses -- besides this
+	options/headers mapping in the opposite direction -- also \ac{HTTP}
+	response codes have to be translated. Other functionality such as observing
+	resources or resource discovery has to be adapted, too.
+
+\section{\acs{CoAP}}
+\label{cha:background:coap}
+
+	The \acl{CoAP} is standardized as \cite{coap} by the \ac{IETF}. It
+	incorporates successful design elements also used in \ac{HTTP}. In contrast
+	to \ac{HTTP} it is binary, based on \ac{UDP} by default and not bound to
+	synchronous messaging or long-lasting connections. Its default ports are
+	\texttt{5683/udp} for unencrypted messages and \texttt{5684/udp} when
+	secured with \ac{DTLS}. Messages can be transferred in a reliable
+	(\emph{Confirmable}) or unreliable way (\emph{Unconfirmable}). Reliably
+	transferred messages are responded to with an acknowledge message by the
+	receiver. If a confirmable message is not responded to, it gets
+	retransmitted in exponentially increasing intervals. A response can either
+	occur directly (piggy-backed) or separately if generating a response would
+	take longer than the retransmission timeout. In this case an empty message
+	is sent first that confirms the request. When the actual response is ready,
+	it gets sent as a new confirmable transmission. Unconfirmable messages are
+	not retransmitted and responses are always separated.
+	
+	\ac{CoAP} specifies the methods \texttt{GET}, \texttt{POST}, \texttt{PUT},
+	and \texttt{DELETE} for retrieval, creation, update, and deletion of
+	resources. Responses carry status codes similar to \ac{HTTP} but less
+	complex. The headers of \ac{CoAP} messages can contain numerous options
+	comparable to \ac{HTTP} header fields. They are used for functionality such
+	as Cache Validation and Conditional Requests (\texttt{ETag},
+	\texttt{If-Match}), or Content Negotiation (\texttt{Accept},
+	\texttt{Content-Format}).
+
+	As \ac{CoAP} is not necessarily reliable and synchronous, it is possible to
+	use multicast messaging to address a group of hosts with a single
+	message\footnote{Although messages effectively are broadcasted on some
+	physical layers such as \cite{802-15-4}}. This can also be used for
+	discovery of other reachable \ac{CoAP} nodes and is called \emph{Service
+	Discovery} (see section 7.1 of \cite{coap}). A special resource with the
+	path \texttt{.well-known/core} is specified to return information about the
+	available resources of a node. This procedure is referred to as
+	\emph{Resource Discovery} (see section 7.2). As the maximum payload size of
+	a \ac{CoAP} message is around 1 KiB, larger resource representations have
+	to be transmitted in several messages as it is defined in an extension for
+	\emph{Block-wise Transfers} \cite{block}. Another extension named
+	\emph{Observing Resources} specifies a way to register for and subsequently
+	receive updates about the state of a resource \cite{observe}.
+
+	\subsection{Existing Implementations}
+	\label{cha:background:coap:implementations}
+
+		In the context of the research questions, it is interesting whether an
+		implementation supports block-wise transfers \cite{block}, observe
+		\cite{observe} and (multicast) group communications \cite{coap-group}.
+		\autoref{table:background:coap:libraries} lists Open Source
+		implementations obtained from the \ac{CoAP} article in the Wikipedia
+		\cite{coap-list-1} and the coap.technology website \cite{coap-list-2}
+		that support server mode, block-wise transfers and observe. The
+		coap.technology website lists a pure Ruby implementation developed in
+		the student project \emph{GOBI} of the communication networks research
+		group (AG Rechnernetze\footnote{\urlAgrn}) at the Universität Bremen
+		based on a \ac{CoAP} message parser by Carsten Bormann. Information
+		about compatibility with Ruby and group communications support is added
+		to the compiled list. A library is seen as compatible if it is written
+		in Ruby itself, C/C++ or Java. Whether multicast communications are
+		supported has been determined by analyzing the respective source code
+		and searching for group addresses specified by section 12.8 of
+		\cite{coap-group}. There are libraries like \emph{libcoap} that are
+		multicast compatible but do not listen on \ac{CoAP} group addresses by
+		default or leave it to the programmer to do so. \emph{CoAPthon} and
+		\emph{SMCP} are the only implementations listening on the \ac{CoAP}
+		group addresses by default\footnote{We also tested incompatible
+		implementations.}.
+
+		\begin{table}[H]
+			\begin{center}
+				\begin{tabular}{l|l|l}
+					Library				& Compatibility	& Multicast (\cite{coap-group}) \\
+					\hline
+					Californium			& \y			& \n \\
+					CoAPthon			& \n			& \y (\acs{IPv4}) \\
+					COAP.NET			& \n			& \n \\
+					Erbium for Contiki	& \n			& \n \\
+					jcoap				& \y			& \n \\
+					libcoap				& \y			& \n \\
+					node-coap			& \n			& \n \\
+					Ruby coap (GOBI)	& \y			& \n \\
+					SMCP				& \y			& \y (\acs{IPv6}) \\
+					txThings			& \n			& \n \\
+				\end{tabular}
+			\end{center}
+			\caption{CoAP Libraries -- Possible compatiblity with Ruby and
+				multicast support}
+			\label{table:background:coap:libraries}
+		\end{table}
+
+		% TODO	Some protocol implementation details of other libraries
+
+		In the following paragraphs, we briefly examine the source code of
+		\emph{Californium} and \emph{libcoap} with regards to their
+		architecture, implementations of the \ac{CoAP} Message Deduplication
+		(see section 4.5 of \cite{coap}) and concurrency approaches.
+		\autoref{table:background:coap:libraries:versions} lists the examined
+		versions.
+
+		\begin{table}[H]
+			\begin{center}
+				\begin{tabular}{l|l}
+					Library				& Version \\
+					\hline
+					Californium			& \href{https://github.com/eclipse/californium/tree/1.0.0-M3}{1.0.0-M3} (Core) \\
+					& \href{https://github.com/eclipse/californium.element-connector/tree/1.0.0-M3}{1.0.0-M3} (Connector) \\
+					libcoap				& \href{http://sourceforge.net/p/libcoap/code/ci/d48ab449fd05801e574e4966023589ed7dac500b/tree}{\texttt{d48ab44}} \\
+%					Ruby coap			& \href{https://github.com/SmallLars/coap/tree/1cd124427b57e84543f3ee6ff2d9148e8499393a}{\texttt{1cd1244}} \\
+%					SMCP				& \href{https://github.com/darconeous/smcp/tree/08e822e86a39e74ce07e0f675980723c70c508cf}{\texttt{08e822e}} \\
+				\end{tabular}
+			\end{center}
+			\caption{CoAP Libraries -- Examined versions}
+			\label{table:background:coap:libraries:versions}
+		\end{table}
+
+		\subsubsection{Architecture}
+
+			% TODO	Californium Exchange class?
+
+			Some architectural inspirations will be mentioned but we will not
+			analyze the overall architecture of every library.
+
+			\emph{Californium} uses an approach similar to the design of Rack
+			to implement different functional protocol \enquote{layers} (see
+			\href{https://github.com/eclipse/californium/blob/1.0.0-M3/californium-core/src/main/java/org/eclipse/californium/core/network/CoAPEndpoint.java#L83}{line
+			83 of \texttt{CoAPEndpoint} class (Core)}). Messages are passed
+			through a stack of classes each handling a certain transmission
+			layer task. A \texttt{ReliabilityLayer}, for example, retransmits
+			messages if there was no response; a \texttt{BlockwiseLayer}
+			handles block-wise transfers.
+
+		\subsubsection{Message Deduplication}
+
+			% TODO	Kontext auf Papier unklar.
+
+			\emph{Californium} makes use of the Java class
+			\texttt{ConcurrentHashMap} as a hash table for managing data about
+			ongoing transmissions (see
+			\href{https://github.com/eclipse/californium/blob/1.0.0-M3/californium-core/src/main/java/org/eclipse/californium/core/network/Matcher.java#L58}{line
+			58 to 61 of \texttt{Matcher} class (Core)}). Three hash tables are
+			used with different keys (message ID, token, and URI). The Java
+			documentation describes \texttt{ConcurrentHashMap} as a
+			\enquote{hash table supporting full concurrency of retrievals and
+			adjustable expected concurrency for updates}
+			\cite{java-concurrenthashmap}.
+
+		\subsubsection{Concurrency}
+		\label{cha:background:coap:concurrency}
+
+			\emph{Californium} maintains a pool of threads which send or
+			receive messages (see
+			\href{https://github.com/eclipse/californium.element-connector/blob/1.0.0-M3/src/main/java/org/eclipse/californium/elements/UDPConnector.java}{\texttt{UDPConnector}
+			class (Connector)}). Other parts of the code asynchronously
+			schedule messages to be sent (see for example
+			\href{https://github.com/eclipse/californium/blob/1.0.0-M3/californium-core/src/main/java/org/eclipse/californium/core/network/stack/ReliabilityLayer.java#L178}{line
+			178 of \texttt{ReliabilityLayer} class (Core)}).
+			\emph{Californiums} use of \texttt{ConcurrentHashMap} ensures safe
+			and performant concurrent access to data shared by several threads.
+
+			% TODO	Kontext auf Papier unklar.
+
+			\emph{libcoap} itself does not implement a server ready to use but
+			provides the \ac{API} for programmers to base their own server
+			implementations on. The source code contains an example server that
+			is realized as a single threaded event loop (see
+			\href{http://sourceforge.net/p/libcoap/code/ci/d48ab449fd05801e574e4966023589ed7dac500b/tree/examples/server.c#l414}{line
+			414 of \texttt{examples/server.c}}).
+
+	\subsection{Server-sent Updates}
+	\label{cha:background:coap:observe}
+
+		% TODO	More RFC6202?
+		% TODO	More SSE?
+
+		In the \ac{HTTP} world, some protocols are designed to overcome the
+		strictly synchronous request model of HTTP/1.1 (see \cite{http-0} ff.)
+		and are therefore in some extent comparable to the \ac{CoAP} Observe
+		extension \cite{observe}. Their properties differ in distinct ways from
+		Observe, which is not keeping connections open, is unidirectional and
+		does not strictly require the server pushing updates only directly
+		after requests of the client. \emph{Long Polling} and \emph{Streaming}
+		are two mechanisms common to achieve server-initiated communication
+		with \ac{HTTP}. \cite{http-bidir} summarizes known issues and lists
+		best practices regarding to the use of these mechanisms. Popular
+		choices for this purpose in the traditional web are
+		Comet\footnote{\urlComet} and WebSockets \cite{websocket}. Both use
+		long opened connections, which puts extra load on the servers. Comet
+		just keeps a \ac{HTTP} GET request opened, which is used by the server
+		to push updates gradually. WebSocket specifies bi-directional
+		out-of-band (non-\ac{HTTP}) communications. Solutions more similar to
+		Observe are \ac{HTTP}/2 Server Push (see section 8.2 of \cite{http2})
+		and \acs{HTML5} Server-Sent Events \cite{sse}, which both are
+		unidirectional but also employ long-running connections. \ac{HTTP}/2
+		Server Push is not truly asynchronous, because the push mechanism is
+		only used to multiplex documents anticipating a direct request.
+		\acs{HTML5} Server-Sent Events are most similar to Observe from an
+		architectural perspective. The implementation of the mentioned
+		protocols in connection with Rack and \ac{Rails} can give valuable
+		input for the design of the Observe integration in the context of this
+		work. Therefore some existing Ruby gems that implement the mentioned
+		techniques can be a source of inspiration. We further analyze that
+		topic in \autoref{cha:design:protocol:observe}.
+
+	\subsection{Payload Formats}
+	\label{cha:background:coap:payload}
+
+		There are a number of different formats for resource representation
+		(serialization) that are more or less optimized on low resource usage
+		(when transmitted or parsed). In the world of less constrained web
+		applications especially \ac{JSON} and \ac{XML} are common as resource
+		representations for \acp{API}. Both are convertible into less resource
+		demanding binary serialization formats. For \ac{JSON} there are for
+		example \ac{BSON}, \ac{UBJSON}, MessagePack and \ac{CBOR}. \ac{XML} can
+		be converted into \ac{EXI} to save resources. We will concentrate on
+		\ac{JSON}, because it currently is more widespread than \ac{XML} in the
+		context of modern web application development. Especially \ac{CBOR} is
+		considered as a binary serialization format due to its closeness to
+		\ac{JSON}, the compactness (of code and data), and the possibility to
+		be used without a schema description (see section 1.1 of \cite{cbor}).
+
+		% As with \ac{CoAP}, it is also standardized by the \ac{CoRE} \ac{WG}
+		% of the \ac{IETF}.

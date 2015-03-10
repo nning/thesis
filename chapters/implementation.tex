@@ -1,0 +1,588 @@
+\chapter{Implementation}
+\label{cha:implementation}
+
+This chapter documents the implementation drafted in the previous chapter.
+Each component realized as an independent module is explained in detail in the
+following sections. \autoref{table:implementation:components} gives an overview
+of the components we worked on, their respective licenses, and the sections
+covering their implementation.
+
+\begin{table}[H]
+	\centering
+	\begin{tabular}{l|l|l}
+		Component & License & Section\\
+		\hline
+		coap (Library) & MIT & \ref{cha:implementation:client} \\
+		david (Server) & GPL & \ref{cha:implementation:david} \\
+		core-rd (\ac{RD}) & AGPL & \ref{cha:implementation:core-rd} \\
+	\end{tabular}
+	\caption{Implemented Components}
+	\label{table:implementation:components}
+\end{table}
+
+\section{External Libraries}
+
+	For all implemented components, we make use of several external libraries.
+	The most important ones are listed in
+	\autoref{table:implementation:libraries}. A more exhaustive list can be
+	obtained from the \texttt{Gemfile.lock} files inside the project
+	repositories.
+
+	\begin{table}[H]
+		\centering
+		\begin{tabular}{l|l|l}
+			Library			& Version	& License \\
+			\hline
+			cbor			& 0.5.9		& Apache 2.0 \\
+			celluloid		& 0.16		& MIT \\
+			celluloid-io	& 0.16.2	& MIT \\
+			rack			& 1.6		& MIT \\
+			rails			& 4.2		& MIT \\
+			rspec			& 3.2		& MIT \\
+		\end{tabular}
+		\caption{External Libraries}
+		\label{table:implementation:libraries}
+	\end{table}
+
+	A small change was integrated into the \emph{Celluloid::IO} project.
+	Through inclusion of \emph{Celluloid::IO}, socket classes are wrapped in a
+	way that prevents blocking usage. Methods which do not block are directly
+	delegated to the wrapped standard library socket class. A delegation for
+	the \texttt{addr} instance method was added in the course of this
+	work\footnote{\urlCelluloidIoPr}.
+
+\section{\acs{CoAP} Library}
+\label{cha:implementation:client}
+
+	The \ac{CoAP} library based on the message parser by Carsten Bormann
+	published by the GOBI project\footnote{\urlGobiCoap} was forked on
+	GitHub\footnote{\url{https://github.com/nning/coap}}. The original project
+	is released under the terms of the MIT
+	license\footnote{\url{https://github.com/SmallLars/coap/blob/master/LICENSE}},
+	and so is the fork we developed. One of the original authors, Simon
+	Frerichs, gave us access to the coap gem on rubygems.org and the first
+	version of our fork we released was
+	0.1.0\footnote{\url{https://rubygems.org/gems/coap}}. The current release
+	version is 0.1.1. Initial objectives were: Restructurization,
+	modularization (for code reuse in the server component), removal of code
+	duplication, freeing of tests from external services, and bug fixes.
+	Another important objective was to make any socket communications
+	non-blocking and shared data structures compatible with concurrent access.
+	The following lists extracted from the commit log summarize the individual
+	changes to the \ac{CoAP} library\footnote{\urlCoapChanges} by category. The
+	whole commit log in comparison to the original source code can be found on
+	GitHub\footnote{\url{https://github.com/nning/coap/compare/SmallLars:master...master}}.
+
+	% TODO	Describe most important changes as text with code snippets
+	%		(especially Transmission)
+
+	\begin{multicols}{2}
+		\subsubsection{Refactoring}
+
+			\begin{itemize}
+				\item Refactoring and simplification of tests
+				\item Refactoring of socket abstraction class
+				\item Modularization of message parser
+				\item Refactoring of central client method (especially method
+					extraction)
+			\end{itemize}
+
+		\subsubsection{Janitor Tasks}
+
+			\begin{itemize}
+				\item Update message parser
+				\item \ac{CoRE} namespace
+				\item More current Ruby version on Travis CI
+				\item Gem updates
+			\end{itemize}
+
+		\subsubsection{Code Optimization and Reimplementation}
+
+			\begin{itemize}
+				\item Reimplementation of command line utility
+				\item Unification and better documentation of client method
+					arguments
+				\item Bugfixes in message parser (path and query encoding)
+				\item \texttt{\ac{CoAP}::Message\#to\_s}
+				\item Preparations for JRuby compatibility
+				\item Content format registry
+				\item \ac{CoRE} Link format \cite{link} implementation
+				\item Changed client method argument order from \{host, port,
+					path, method, payload, options, callback\} to \{method,
+					path, host, port, payload, options, callback\} (all but
+					method and path are omitable)
+				\item Changed socket abstraction to non-blocking transmission
+					layer class (\texttt{Transmission}) based on
+					\texttt{Celluloid::IO}
+				\item Separate support and ACK on CON in
+					\texttt{Transmission} class
+				\item JRuby support
+				\item Optimized chunkifying payload for block-wise requests
+				\item Corrected maximum random numbers for mid and token
+				\item Configurable socket for \texttt{Transmission}
+				\item \ac{CoAP} transmission \acp{FSM} (not yet properly
+					integrated)
+				\item Reimplementation of \texttt{Block} class
+				\item Utility code to determine \acl{OS}, check if network
+					interface is up and network interface name to index
+					conversion (needed in context of server multicast
+					implementation)
+				\item Support for setting the query in client
+			\end{itemize}
+
+		\subsubsection{Testing}
+
+			\begin{itemize}
+				\item Preparations for RSpec \cite{rspec}
+				\item Porting of client tests to RSpec (block1, observe, and
+					separate)
+			\end{itemize}
+	\end{multicols}
+
+\section{David}
+\label{cha:implementation:david}
+
+	The core of this work -- the CoAP server component with a Rack interface --
+	is called \emph{David} in reference to
+	\href{http://postrank-labs.github.io/goliath}{Goliath} (an asynchronous
+	\ac{HTTP} server with a Rack interface). It is realized as a Ruby
+	gem\footnote{\url{https://rubygems.org/gems/david}} and can be used as a
+	drop-in replacement for \ac{HTTP} servers in a \ac{Rails} application. It
+	is released under the terms of the \ac{GPL} \cite{gplv3} and downloadable
+	on GitHub\footnote{\urlDavid}. James Fairbairn originally held \emph{david}
+	as a name on rubygems.org but kindly gave it to us. The first public
+	release was version 0.3.0.pre. The current stable release is 0.4.3 and all
+	code descriptions in this section refer to that version.
+
+	The code was developed mostly on \ac{MRI} versions between 2.1.4 and 2.2.0
+	but it was also optimized for and tested on \ac{MRI} 1.9.3-p551 and
+	2.3.0-dev, JRuby 1.7.18 and 9.0.0.0-pre, and Rubinius from 2.4.0 till
+	2.5.2. In JRuby and Rubinius, the detection of multicast messages does not
+	work because of the platforms' \texttt{Socket} \acp{API} (for further
+	details, see \autoref{cha:implementation:david:protocol}). The message
+	handling of David running on Rubinius suffers from a deadlock problem that
+	could not been solved yet. Some of the server's features such as
+	application Resource Discovery (see \autoref{cha:implementation:discovery})
+	are specific or at least tied to Rails and do not work with every Rack
+	based framework.
+	
+	The following subsections handle specific aspects of the implementation.
+
+	\subsection{Options}
+
+		Besides configuration through the commandline (e.g.\ with the
+		\texttt{-O} option of \texttt{rackup}), the server's options can be set
+		from the Rails application config (e.g.\ in
+		\texttt{config/application.rb}. The possible configuration options are
+		listed in \autoref{table:implementation:david:options}.
+
+		\begin{table}[H]
+			\centering
+			\begin{tabular}{l|l|l|l}
+				Rack key & Rails key & Default & Semantics \\
+				\hline
+				Block & coap.block & true & Block-wise transfer support \\
+				\ac{CBOR} & coap.cbor & false & \ac{JSON}/\ac{CBOR} transcoding \\
+				DefaultFormat & coap.default\_format & & Default Content-Type \\
+				& & & (if \ac{CoAP} accept omitted) \\
+				Host & & ::1 / :: & Server listening host \\
+				Log & & info & Log level (none or debug) \\
+				MinimalMapping & & false & Minimal mapping \\
+				& & & (see \autoref{cha:evaluation:interoperability:rack}) \\
+				Multicast & coap.multicast & true & Multicast support \\
+				Observe & coap.observe & true & Observe support \\
+				& coap.only & true & Removes \ac{HTTP} middleware \\
+				& & & and adds David as default \\
+				& & & Rack handler \\
+				Port & & 5683 & Server listening port \\
+				& \small{coap.resource\_discovery} & true & Provision of \\
+				& & & \texttt{.well-known/core} \\
+			\end{tabular}
+			\caption{David configuration options}
+			\label{table:implementation:david:options}
+		\end{table}
+
+	\subsection{Rack}
+
+		David adds some application specific entries to the Rack environment
+		which are listed in \autoref{table:implementation:david:rack}.
+
+		\begin{table}[H]
+			\centering
+			\begin{tabular}{l|l|l}
+				Key				& Value class	& Semantics \\
+				\hline
+				coap.version	& Integer		& Protocol version of \ac{CoAP} request \\
+				coap.multicast	& Boolean		& Marks whether request was received via multicast \\
+				coap.dtls		& String		& \ac{DTLS} mode (as defined in section 9 of \cite{coap}) \\
+				coap.dtls.id	& String		& \ac{DTLS} identity \\
+				coap.cbor		& Object		& Ruby object deserialized from \ac{CBOR}
+			\end{tabular}
+			\caption{Rack environment additions of David}
+			\label{table:implementation:david:rack}
+		\end{table}
+
+		We monkey-patched the Rack code to use David as the default Rack
+		handler unless Rails is loaded and \texttt{config.coap.only} is set to
+		\texttt{false} (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/guerilla/rack/handler.rb}{\texttt{lib/david/guerilla/rack/handler.rb}}).
+		This way executing \texttt{rackup} or \texttt{rails s} starts the
+		\ac{CoAP} server, and does not try the original Rack handler order
+		(thin, puma, webrick). The actual Rack handler is defined in
+		\href{https://github.com/nning/david/blob/0.4.3/lib/rack/handler/david.rb}{\texttt{lib/david/rack/handler/david.rb}}
+		and performs the startup of the different server actors
+		(\texttt{Server}, \texttt{GarbageCollector}, and \texttt{Observe}) in a
+		\emph{Celluloid} supervision group.
+
+		Automatic provision of Resource Discovery trough a
+		\texttt{.well-known/core} resource and return of exceptions caused by
+		the application in a human readable format are created as Rack
+		middleware classes \texttt{David::ResourceDiscovery} (see
+		\autoref{cha:implementation:discovery}) and
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/show\_exceptions.rb}{\texttt{David::ShowExceptions}
+		(see \texttt{lib/david/show\_exceptions.rb})}. They are inserted into
+		the middleware stack by the \texttt{David::Railties::Middleware}
+		railtie (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/railties/middleware.rb}{\texttt{lib/david/railties/middleware.rb}}).
+		Other middleware shipped with Rails is removed if it (currently)
+		provides no features in connection with \ac{CoAP} (see line 8 ff.). It
+		is possible to keep it included in the middleware stack by setting
+		\texttt{coap.only} to \texttt{false} in the Rails application config.
+
+	\subsection{Protocol Implementation}
+	\label{cha:implementation:david:protocol}
+
+		Parsing incoming transmissions does not utilize other shared
+		functionality from the \ac{CoAP} library than the
+		\texttt{CoAP::Message.parse} method, which was provided by Carsten
+		Bormann and only changed minimally. For answering or initiating
+		transmissions, the \texttt{CoAP::Transmission} class (see
+		\href{https://github.com/nning/coap/blob/0.1.1/lib/core/coap/transmission.rb}{\texttt{lib/core/coap/transmission.rb}}
+		in version 0.1.1 of the coap gem source) was used first to avoid code
+		duplication. It abstracts timeouts, retransmissions, ACK answering,
+		separate answers and checking of message identifiers and tokens. For
+		more information, refer to \autoref{cha:implementation:client}.
+		However, when optimizing the server for throughput performance it
+		became obvious that this shared functionality also introduced overhead.
+		Most features were too client centric anyway: Retransmissions, incoming
+		separate transmissions and message token management are not necessarily
+		useful for a server. These shared code parts are also not modular
+		enough to allow a single place for incoming message dispatching. So
+		after a redesign of the architecture, messages are sent by direct
+		invocation of \texttt{send} on the server socket. References to that
+		socket are passed between actors. The first version with the revised
+		architecture is 0.4.0. A cache for message correlation and
+		deduplication of confirmable requests is currently solved through a
+		Ruby hash with endpoint and message identifier as key and the cached
+		response and a timestamp for cache invalidation as values (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/mid\_cache.rb}{\texttt{lib/david/server/mid\_cache.rb}}).
+		The \texttt{GarbageCollector} actor (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/garbage\_collector.rb}{\texttt{lib/david/garbage\_collector.rb}})
+		periodically cleans the cache from obsolete messages. Using the
+		reimplemented block support of the coap gem, block-wise transfers
+		\cite{block} were integrated into the server. However, the current
+		state only supports block-wise responses; block-wise transfers for
+		assembling requests are not supported. Separate responses as designed
+		in \autoref{cha:design:server:coap:separate} were not implemented yet
+		as they make a bigger change to the current request/response cycle
+		necessary.
+		
+		Observe support is accomplished through a \emph{Celluloid} actor
+		handling the notifications. The \texttt{Server} actor adds or removes
+		listeners via \texttt{\#add} or \texttt{\#delete} messages to the
+		\texttt{Observe} actor (as depicted in \autoref{img:observe:cache};
+		also see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/respond.rb#L133}{line
+		133 of \texttt{lib/david/server/respond.rb}}). Listeners are saved in a
+		Ruby hash with endpoint and message token as key and observe number
+		(initially 0), original request, rack environment, originally returned
+		\texttt{ETag}, and a timestamp for cache invalidation as values (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/observe.rb}{\texttt{lib/david/observe.rb}}).
+		In a static interval of 3 seconds by default, the \texttt{Observe}
+		actor checks every target resource of the observe relationships on
+		changes and sends updates to the endpoint if necessary. The update
+		check is solved by requesting a full framework answer for the original
+		request from the \texttt{Server} actor. If the \texttt{ETag} differs
+		between the original request and response, an observe notification is
+		sent to the endpoint. The observe relationship persists unless the
+		endpoint answers with a reset message to a notification, explicitly
+		deregisters or the update check is answered with an error response code
+		by the framework or application. There is potential for performance
+		improvements in the current implementation, because the
+		\texttt{Observe} actor neither refreshes every individual resource only
+		once per tick nor makes effective use of \ac{HTTP} caching as drafted
+		in \autoref{cha:design:protocol:observe}. A correctly set \texttt{ETag}
+		header is mandatory for the \texttt{Observe} actor to decide if an
+		observe notification has to be sent. Rails automatically includes
+		\texttt{Rack::ETag}, which is a Rack middleware that transparently adds
+		an \texttt{ETag} header. This middleware can be included manually when
+		using more minimal frameworks. As an example, see
+		\href{https://github.com/nning/david/blob/0.4.3/config.ru#L6}{line
+		6 of \texttt{config.ru}}, a Rack configuration that starts a plain Rack
+		application for testing purposes.
+
+		\autoref{lst:david:eventloop} shows the implementation of the event
+		loop. Inside a class including \texttt{Celluloid::IO},
+		\texttt{recvfrom} automatically uses the \texttt{Celluloid::IO} event
+		loop. There were some changes necessary to the original message
+		handling to determine if a request has been received on a multicast
+		address. The non-blocking \texttt{\#recvfrom} method exposed by
+		\texttt{Celluloid::IO::UDPSocket} class instances does not return
+		sufficient information. Therefore \texttt{\#recvmsg\_nonblock} of the
+		wrapped \texttt{UDPSocket} class instance was used to receive data and
+		information on the target address from the socket. The event loop was
+		implemented as in \texttt{\#recvfrom} of
+		\texttt{Celluloid::IO::UDPSocket} (see
+		\href{https://github.com/celluloid/celluloid-io/blob/9ccce9ba40535b4fa204e69f312bc2fe53dda3a1/lib/celluloid/io/udp_socket.rb#L19}{the
+		\texttt{Celluloid::IO::UDPSocket} implementation} and
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server.rb#L45}{line
+		45 of \texttt{lib/david/server.rb}} for reference) using
+		\texttt{Celluloid::IO.wait\_readable} which is based on the \ac{OS}
+		independent I/O selector \ac{API} of nio4r\footnote{\urlNio}. In JRuby
+		and Rubinius we use the non-blocking \texttt{recvfrom} method provided
+		by \emph{Celluloid::IO}. This change was not proposed to the
+		\emph{Celluloid::IO} project, because we could not get a Ruby \ac{VM}
+		independent implementation working due to the absence of a
+		\texttt{recvmsg\_nonblock} method in JRuby and Rubinius. Since
+		\emph{Celluloid::IO} aims on \ac{VM} independence, this effort was
+		canceled for now.
+
+		\begin{figure}
+			\begin{lstlisting}[gobble=8,caption={Server Event Loop},label={lst:david:eventloop}]
+				loop do
+					if jruby_or_rbx?
+						dispatch(*@socket.recvfrom(1152))
+					else
+						begin
+							dispatch(*@socket.to_io.recvmsg_nonblock)
+						rescue ::IO::WaitReadable
+							Celluloid::IO.wait_readable(@socket)
+							retry
+						end
+					end
+				end
+			\end{lstlisting}
+		\end{figure}
+		
+	\subsection{Concurrency and Performance}
+
+		For maximizing the packet handling throughput, it is important how
+		concurrency is accomplished on packet receiving. The main code
+		regarding concurrent handling of network packets resides in
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server.rb}{\texttt{lib/david/server.rb}}.
+		The event loop (line 41 ff. of that file) is also shown in
+		\autoref{lst:david:eventloop}. The Rack handler starts the basic server
+		actors \texttt{Server}, \texttt{Observe}, and
+		\texttt{GarbageCollector}. Each actor runs in its own Thread and is
+		supervised by \emph{Celluloid} (restarted on errors).  Afterwards the
+		Rack handler code calls the \texttt{run} method on the \texttt{Server}
+		actor blockingly (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/rack/handler/david.rb#L15}{line
+		15 of \texttt{lib/rack/handler/david.rb}}).
+		
+		The event loop receives incoming package data in a non-blocking way and
+		calls the \texttt{dispatch} method for input handling (lines 3 and 6 of
+		\autoref{lst:david:eventloop}). If the \texttt{IO} object is not
+		readable, \texttt{Celluloid::IO} is used to select the next readable
+		one (line 8). Benchmarks showed a significant performance increase
+		through avoidance of calling \texttt{dispatch} asynchronously in a
+		Fiber (by the \texttt{async} method provided by \emph{Celluloid}). It
+		is important that blocking I/O operations are not used by the framework
+		or application programmer, because the generation of the Rack
+		application's response happens inside the event loop and it stops other
+		incoming messages from being processed. Non blocking database adapters
+		have to be used in the Rack application. Support for separate answers
+		would especially be useful in this context.
+			
+	\subsection{Protocol Translations}
+		
+		The \ac{CoAP} methods are mapped directly to their \ac{HTTP}
+		counterparts and passed to the Rack compatible framework via the
+		\texttt{REQUEST\_METHOD} Rack environment entry. Messages with
+		\ac{CoAP} codes that are undefined method codes (see section 12.1.1 of
+		\cite{coap}) are dropped directly after parsing the message.
+
+		Most direct mappings of \ac{HTTP} response codes and headers to
+		\ac{CoAP} response codes and options are performed as specified in
+		\autoref{cha:design:protocol} through the methods defined in
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/mapping.rb}{\texttt{lib/david/server/mapping.rb}}.
+		The methods are included into the \texttt{David::Server} class and used
+		especially in its \texttt{respond} method defined in
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/respond.rb}{\texttt{lib/david/server/respond.rb}}.
+		The \ac{HTTP} response codes returned in Rack responses are mapped
+		according to the procedures described in \autoref{cha:design:protocol}.
+		In the Ruby code the map is represented through the constant
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/mapping.rb#L6}{\texttt{HTTP\_TO\_COAP\_CODES}}.
+		With the Rack option \emph{MinimalMapping}, the default mapping of
+		\ac{HTTP} to \ac{CoAP} response codes can be deactivated in case
+		application programmers want to explicitly return a certain code but
+		can not use a Float (see
+		\autoref{cha:evaluation:interoperability:rack}). Currently the
+		implementation does not map \ac{HTTP} return code \textbf{and} methods
+		to \ac{CoAP} codes. Also the translation of \ac{HTTP} redirects to
+		\ac{JSON} redirect descriptions is not implemented. Both were queued up
+		because of the time constraints of this work.
+		
+		The \texttt{Mapping} module also contains methods to convert certain
+		headers from \ac{HTTP} to \ac{CoAP} or the other way round.
+		\texttt{etag\_to\_coap} converts the \ac{HTTP} ETag header value string
+		(containing a hash of the body) by interpreting its first bytes
+		(defaulting to four) as an integer. \texttt{location\_to\_coap} splits
+		the Location header string value into \ac{CoAP} Location-Path segments.
+		\texttt{max\_age\_to\_coap} returns the Cache-Control header's max-age
+		value as an integer. The method \texttt{accept\_to\_http} is used to
+		translate the Accept header from \ac{CoAP} to \ac{HTTP} and is
+		therefore enabling Content Negotiation (as specified in
+		\autoref{cha:design:protocol:content}). The options Content-Format,
+		Max-Age, Location-Path, and Size2 are mapped without individual methods
+		of the \texttt{Mapping} module. The other direct header mappings
+		drafted in \autoref{table:mapping:headers} (Proxy-Uri, Proxy-Scheme,
+		Location-Query, If-Match, If-None-Match, and Size1) are not
+		implemented, yet.
+
+		Content transcoding of \ac{CBOR} to \ac{JSON} and vice versa is
+		activated if the Rack environment option \texttt{CBOR} or the Rails
+		option \texttt{config.coap.cbor} are set to \texttt{true}. It is
+		deactivated by default. If the transcoding is activated and an incoming
+		request has the content format \emph{application/cbor} (60), the
+		message body is parsed by the Ruby cbor gem \cite{cbor-gem} as
+		\ac{CBOR} into a Ruby object (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/respond.rb#L31}{line
+		31 of \texttt{lib/david/server/respond.rb}} and
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/mapping.rb#L41}{line
+		41 of \texttt{lib/david/server/mapping.rb}}). This object is saved in
+		the Rack environment (as value of the key \texttt{coap.cbor}) and then
+		converted to \ac{JSON}, wrapped in a StringIO instance and also handed
+		down the Rack stack as Rack environment option \texttt{rack.input}. The
+		Rack environment option \texttt{CONTENT\_TYPE} is set to
+		\emph{application/json} if \ac{CBOR} parsing and \ac{JSON}
+		serialization did not throw any exceptions. The
+		\texttt{CONTENT\_LENGTH} is updated according to the length of the
+		resource represented as \ac{JSON}. Rails integrates the deserialized
+		object into the params Hash which is accessable in controller code.
+		After a Rack response is obtained from the application, the response
+		body is transcoded to \ac{CBOR} if its content type is
+		\emph{application/json}. The resource representation is parsed as
+		\ac{JSON} into a Ruby object and then serialized into \ac{CBOR} (see
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/respond.rb#L50}{line
+		50 of \texttt{lib/david/server/respond.rb}} and
+		\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/mapping.rb#L38}{line
+		38 of \texttt{lib/david/server/mapping.rb}}).
+
+	\subsection{Architecture}
+
+		We made especially use of \emph{Celluloid} actors and the inclusion of
+		modules into classes for modularization.
+		\autoref{fig:implementation:object-relations-1} and
+		\ref{fig:implementation:object-relations-2} show the object relations.
+		The former concentrates on the actors mainly involved in request
+		handling and response processing, whereas the latter shows Rack
+		middleware and \ac{Rails} extensions. In both graphs names are suffixed
+		with a letter in square brackets that indicates the type. \emph{C}
+		stands for a Ruby class, \emph{M} for a model, and \emph{A} for a
+		\emph{Celluloid} actor.
+		
+		% TODO	Configure rotation angle.
+		\begin{figure}
+			\centering
+			\includegraphics[width=\textheight,angle=270]{images/object-relations-1.pdf}
+			%\includegraphics[width=\textheight,angle=90]{images/object-relations-1.pdf}
+			\caption{Object Relations (Server)}
+			\label{fig:implementation:object-relations-1}
+		\end{figure}
+
+		\begin{figure}
+			\centering
+			\includegraphics[width=\textwidth]{images/object-relations-2.pdf}
+			\caption{Object Relations (Middleware)}
+			\label{fig:implementation:object-relations-2}
+		\end{figure}
+
+\section{Resource Discovery}
+\label{cha:implementation:discovery}
+
+	The provision of the \texttt{.well-known/core} interface for resource
+	discovery on an application implemented in \ac{Rails} is solved through a
+	Rack middleware that is also a \emph{Celluloid} actor. The middleware code
+	mainly resides in
+	\href{https://github.com/nning/david/blob/0.4.3/lib/david/resource_discovery.rb}{\texttt{lib/david/resource\_discovery.rb}}.
+	Currently, it is \ac{Rails} specific, so applications written with other
+	Rack supporting frameworks would have to implement Resource Discovery by
+	their own. On invocation of \texttt{call}, the actor responds with a cached
+	list of resources in the CoRE Link Format \cite{link} if the request is a
+	GET on \texttt{.well-known/core}. The responded resources are automatically
+	detected via \ac{Rails} routes and can be extended with link attributes by
+	annotations in the controllers as depicted in
+	\autoref{lst:discovery:annotation} and \autoref{img:discovery:annotation}.
+	The annotation and registration of attributes at the Resource Discovery
+	actor is accomplished by a class method named \texttt{discovery} defined on
+	\texttt{ActiveController::Base} in
+	\href{https://github.com/nning/david/blob/0.4.3/lib/david/rails/action_controller/base.rb}{\texttt{lib/david/rails/action\_controller/base.rb}}.
+	Due to \ac{Rails} lazy loading controller classes in the \emph{development}
+	environment, the \texttt{discoverable} class method is not called until the
+	first time a route mapped to an action of that controller is requested. To
+	overcome this limitation, link attributes for discovery would have to be
+	specified together with the application routing.
+
+	Especially for Service and Resource Discovery, the basics of
+	\cite{coap-group} have been implemented in both David and the coap gem.
+	The initialization of the socket is packaged in the \texttt{Multicast}
+	module (see
+	\href{https://github.com/nning/david/blob/0.4.3/lib/david/server/multicast.rb}{\texttt{lib/david/server/multicast.rb}}).
+	The multicast groups \texttt{ff02::1}, \texttt{ff02::fd},
+	\texttt{ff05::fd}, and \texttt{224.0.1.187} are joined by default (also see
+	section 12.8 of \cite{coap}). Some workarounds had to be implemented
+	specific to OS X. The OS X kernel does not support joining a \acs{IPv6}
+	multicast group on the default interface if the interface index is set to 0
+	(despite both the documentation and POSIX specification states otherwise),
+	for example\footnote{\urlOsxMcast}. Utility methods for conversion of a
+	network interface name to index and to test if an interface is activated
+	have been integrated into the coap gem as extensions of the Ruby standard
+	library \texttt{Socket} class (see
+	\href{https://github.com/nning/coap/blob/0.1.1/lib/core/core_ext/socket.rb}{\texttt{lib/core/core\_ext/socket.rb}}).
+
+	Other actors like \texttt{Server}, \texttt{Observe}, or
+	\texttt{GarbageCollector} are instantiated and supervised named by calling
+	\texttt{supervise\_as} instead of \texttt{new} (in
+	\href{https://github.com/nning/david/blob/0.4.3/lib/rack/handler/david.rb#L7}{lines
+	7-12 of \texttt{lib/rack/handler/david.rb}}). However, when a
+	middleware is inserted into the stack with a Railtie, not an instance of
+	the class but the class itself is passed. This way a discovery actor could
+	not be supervised by \emph{Celluloid} and communicated with by name.
+	Therefore, it has to register \enquote{manually} on initialization. This
+	unfortunately does not mean it is also supervised. In this case, the
+	solution is to proxy the actual Resource Discovery actor with a class
+	behaving like an ordinary Rack middleware (as seen in
+	\href{https://github.com/nning/david/blob/0.4.3/lib/david/resource_discovery_proxy.rb}{\texttt{lib/david/resource\_discovery\_proxy.rb}}).
+	On initialization of this class, the Resource Discovery actor is
+	instantiated and supervised named. When the \texttt{call} method is
+	invoked, it is passed on to the actor.
+
+\section{\acf{RD}}
+\label{cha:implementation:core-rd}
+
+	The \acl{RD} component is realized as a \ac{Rails} application
+	(downloadable from GitHub\footnote{\urlCoreRd}) in order to further test
+	\emph{David} and other implemented components regarding \ac{CoAP}
+	application development. The Rack middleware for Resource Discovery shipped
+	with David is not used in this case, because the \ac{Rails} application
+	should provide a custom logic behind the \texttt{.well-known/core} resource
+	and the middleware is tightly integrated with the routing and controllers.
+	By default the \ac{CoAP} server sets the \texttt{Accept} header to
+	\texttt{application/json} if it is not specified by the client. In the
+	\ac{RD} application, the default content format is configured to
+	\texttt{application/link-format}. Currently only the \emph{\ac{RD} Function
+	Set} (see section 5 of \cite{rd}) is implemented completely. The
+	\emph{\ac{RD} Lookup Function Set} (see section 7) is only implemented in a
+	way that allows for the lookup of resources (\emph{res} lookup type). We
+	did not implement the \emph{Group Function Set} (see section 6) or the
+	lookup types related to that set.
+
+	There are Active Record models for Resource Registrations, Typed Links, and
+	their Target Attributes (see
+	\href{https://github.com/nning/core-rd/blob/0.1.0/app/models}{the
+	\texttt{app/models} directory in the \texttt{core-rd} repository}).
+	Controllers exist per function set and for the \texttt{.well-known/core}
+	ressource (see
+	\href{https://github.com/nning/core-rd/tree/0.1.0/app/controllers}{\texttt{app/controllers}}).
+	We developed the application utilizing \ac{TDD} with RSpec.
