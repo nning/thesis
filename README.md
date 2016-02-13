@@ -29,6 +29,11 @@ implemented by us as a Rails application running on our server software.
 * https://github.com/nning/david
 * https://github.com/nning/core-rd
 
+## TeX Live Package Dependencies on Arch Linux
+
+    sudo pacman -S texlive-bibtexextra texlive-fontsextra texlive-core \
+      texlive-latexextra texlive-pictures
+
 ## Copyright
 
 This work is licensed under a [Creative Commons
